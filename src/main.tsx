@@ -1,3 +1,4 @@
+import "./fbcheck";
 import "./diag";
 import "./healthcheck";
 import React from 'react'
