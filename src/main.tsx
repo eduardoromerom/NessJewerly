@@ -1,7 +1,6 @@
-import "./sw-kill";
 import "./firebase";
+import "./pwa";
 import "./auth-init";
-import "./firebase";
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
