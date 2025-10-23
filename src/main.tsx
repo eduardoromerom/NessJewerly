@@ -1,3 +1,5 @@
+console.log("BOOT main.tsx", new Date().toISOString());
+import "./auth-debug";
 import "./auth-init";
 import React from "react";
 import ReactDOM from "react-dom/client";
