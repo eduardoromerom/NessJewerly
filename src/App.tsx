@@ -1,3 +1,7 @@
 import React from "react";
-import ItemsDemo from "./ItemsDemo";
-export default function App() { return <ItemsDemo />; }
+export default function App() {
+  return <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
+    <h1>Ness Jewelry</h1>
+    <p>App lista ✅</p>
+  </div>;
+}
