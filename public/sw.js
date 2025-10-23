@@ -1,4 +1,4 @@
-// SW destructor: toma control, borra caches y se desregistra
+// Desregistra y borra caches; luego recarga una vez
 self.addEventListener('install', (e) => self.skipWaiting());
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {

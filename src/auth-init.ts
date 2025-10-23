@@ -8,10 +8,6 @@ export const authReady = new Promise<string>((resolve, reject) => {
       if (u?.uid) { off(); return resolve(u.uid); }
       const cred = await signInAnonymously(auth);
       off(); resolve(cred.user.uid);
-    } catch (e) { off(); reject(e); }
+    } catch (e) { off(); reject(e as any); }
   });
 });
-
-// (Opcional) log mínimo para diagnóstico silencioso
-authReady.then(uid => console.log("[auth] uid:", uid))
-         .catch(e => console.error("[auth] error:", e));
