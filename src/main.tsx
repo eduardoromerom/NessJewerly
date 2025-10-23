@@ -1,3 +1,4 @@
+import "./sw-kill";
 import "./firebase";
 import "./auth-init";
 import "./firebase";
