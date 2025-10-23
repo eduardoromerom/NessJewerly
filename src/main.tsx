@@ -1,3 +1,4 @@
+import "./sw-off";
 import "./firebase";
 import "./auth-init";
 import React from 'react'
