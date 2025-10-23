@@ -1,13 +1,8 @@
-console.log("BOOT main.tsx", new Date().toISOString());
-import "./auth-debug";
-import "./auth-init";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "./firebase"; // ¡import obligatorio para inicializar Firebase!
+import "./firebase"; // inicializa Firebase
 import App from "./App";
-
+console.log("BOOT main", new Date().toISOString());
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
+  <React.StrictMode><App/></React.StrictMode>
 );
