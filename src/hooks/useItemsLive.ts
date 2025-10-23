@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   collection, query as q, onSnapshot,
   where, orderBy as ob, limit as lmt,
-  WhereFilterOp, DocumentData
+  WhereFilterOp, DocumentData, Unsubscribe
 } from "firebase/firestore";
-import { db } from "@/firebase";
+import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { db, auth } from "@/firebase";
 
-/** Modelo mínimo de Item. Ajusta campos a tu esquema real. */
 export type Item = {
   id: string;
   sku?: string;
@@ -18,6 +18,16 @@ export type Item = {
 
 type Filter = [field: string, op: WhereFilterOp, value: any];
 type Order = [field: string, dir: "asc" | "desc"];
+
+async function ensureSignedIn(): Promise<void> {
+  if (auth.currentUser) return;
+  await new Promise<void>((resolve, reject) => {
+    const off = onAuthStateChanged(auth, (u) => {
+      if (u) { off(); resolve(); }
+    });
+    signInAnonymously(auth).catch((e) => { off(); reject(e); });
+  });
+}
 
 export function useItemsLive(opts?: {
   filters?: Filter[];
@@ -39,20 +49,29 @@ export function useItemsLive(opts?: {
   }, [colRef, JSON.stringify(filters), JSON.stringify(orderBy), limit]);
 
   useEffect(() => {
-    setLoading(true);
-    const unsub = onSnapshot(
-      liveQuery,
-      (snap) => {
-        const rows: Item[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as DocumentData) }));
-        setItems(rows);
-        setLoading(false);
-      },
-      (err) => {
-        setError(err);
-        setLoading(false);
+    let unsub: Unsubscribe | undefined;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setLoading(true);
+        await ensureSignedIn();
+        if (cancelled) return;
+        unsub = onSnapshot(
+          liveQuery,
+          (snap) => {
+            const rows: Item[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as DocumentData) }));
+            setItems(rows);
+            setLoading(false);
+          },
+          (err) => { setError(err); setLoading(false); }
+        );
+      } catch (e) {
+        setError(e); setLoading(false);
       }
-    );
-    return () => unsub();
+    })();
+
+    return () => { cancelled = true; unsub?.(); };
   }, [liveQuery]);
 
   return { items, loading, error };
