@@ -1,5 +1,5 @@
-import "./firebase";
 import "./auth-init";
+import "./firebase";
 import "./sw-off";
 import React from 'react'
 import ReactDOM from 'react-dom/client'
