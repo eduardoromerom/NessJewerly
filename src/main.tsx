@@ -1,6 +1,6 @@
+import "./firebase";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "./firebase"; // inicializa Firebase
 import App from "./App";
 console.log("BOOT main", new Date().toISOString());
 ReactDOM.createRoot(document.getElementById("root")!).render(
