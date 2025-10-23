@@ -34,7 +34,7 @@ export function useLiveQuery(
     (async () => {
       try {
         setLoading(true);
-        await authReady; // espera sesión antes de escuchar (reglas)
+        await authReady; // espera sesión anónima
         if (cancelled) return;
         unsub = onSnapshot(
           qref,

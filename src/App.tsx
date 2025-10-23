@@ -1,11 +1,11 @@
 import React from "react";
-import ItemsView from "./ItemsView";
+import InventoryView from "./views/Inventory";
 
 export default function App() {
   return (
-    <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
+    <div className="container">
       <h1>Ness Jewelry</h1>
-      <ItemsView />
+      <InventoryView />
     </div>
   );
 }
