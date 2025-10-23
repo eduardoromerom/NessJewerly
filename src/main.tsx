@@ -1,3 +1,4 @@
+import "./sw-kill";
 import "./firebase";
 import React from 'react'
 import ReactDOM from 'react-dom/client'
