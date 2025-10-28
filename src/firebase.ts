@@ -9,7 +9,6 @@ import {
 import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
-// Proyecto fijo (ness-e6877)
 const firebaseConfig = {
   apiKey: "AIzaSyA8or2Uv80v1DQ2UzA0yuIIvxScctxJvPg",
   authDomain: "ness-e6877.firebaseapp.com",
@@ -22,28 +21,28 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 
-// Firestore con caché persistente y multi-tab (sin Service Worker)
+// Cache offline + multitab y *fallback* de red robusto
 try {
   initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
-    })
+    }),
+    experimentalAutoDetectLongPolling: true, // cae a long-polling si hace falta
+    useFetchStreams: false                   // evita fetch streaming (CORS/ITP)
+    // Si aún falla en tu red, como último recurso:
+    // experimentalForceLongPolling: true
   });
-} catch {
-  // si ya estaba inicializado (hot reload), seguimos
-}
+} catch {}
 export const db = getFirestore(app);
 
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-// Analytics (opcional)
 export let analytics: ReturnType<typeof getAnalytics> | undefined;
 if (typeof window !== "undefined") {
   isSupported().then(ok => { if (ok) analytics = getAnalytics(app); });
 }
 
-// Utilidad de diagnóstico
 export const __whoami = () => ({
   projectId: firebaseConfig.projectId,
   authDomain: firebaseConfig.authDomain
