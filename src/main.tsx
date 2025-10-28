@@ -1,3 +1,4 @@
+import "./api/items";
 import "./live-bridge";
 import "./firebase";
 import "./auth-init";
