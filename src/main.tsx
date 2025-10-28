@@ -1,3 +1,4 @@
+import "./live-bridge";
 import "./firebase";
 import "./auth-init";
 import React from 'react'
