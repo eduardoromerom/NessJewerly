@@ -1,10 +1,15 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  getFirestore
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
-// Config fija: ness-e6877
+// Proyecto fijo (ness-e6877)
 const firebaseConfig = {
   apiKey: "AIzaSyA8or2Uv80v1DQ2UzA0yuIIvxScctxJvPg",
   authDomain: "ness-e6877.firebaseapp.com",
@@ -16,12 +21,30 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// Firestore con caché persistente y multi-tab (sin Service Worker)
+try {
+  initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  });
+} catch {
+  // si ya estaba inicializado (hot reload), seguimos
+}
 export const db = getFirestore(app);
+
+export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-// Analytics solo si es compatible
+// Analytics (opcional)
 export let analytics: ReturnType<typeof getAnalytics> | undefined;
 if (typeof window !== "undefined") {
   isSupported().then(ok => { if (ok) analytics = getAnalytics(app); });
 }
+
+// Utilidad de diagnóstico
+export const __whoami = () => ({
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain
+});
