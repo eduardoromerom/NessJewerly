@@ -1,49 +1,43 @@
+// src/firebase.ts
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeFirestore /*, setLogLevel */ } from "firebase/firestore";
 import {
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  getFirestore
-} from "firebase/firestore";
-import { getStorage } from "firebase/storage";
-import { getAnalytics, isSupported } from "firebase/analytics";
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  onAuthStateChanged,
+} from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyA8or2Uv80v1DQ2UzA0yuIIvxScctxJvPg",
-  authDomain: "ness-e6877.firebaseapp.com",
-  projectId: "ness-e6877",
-  storageBucket: "ness-e6877.appspot.com",
-  messagingSenderId: "94128190545",
-  appId: "1:94128190545:web:6dc48d82b7682da7c3b470",
-  measurementId: "G-RM23K8HBEY"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "ness-e6877.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "ness-e6877",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  // Opcionales:
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "ness-e6877.appspot.com",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 export const app = initializeApp(firebaseConfig);
 
-// Cache offline + multitab y *fallback* de red robusto
-try {
-  initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    }),
-    experimentalAutoDetectLongPolling: true, // cae a long-polling si hace falta
-    useFetchStreams: false                   // evita fetch streaming (CORS/ITP)
-    // Si aún falla en tu red, como último recurso:
-    // experimentalForceLongPolling: true
-  });
-} catch {}
-export const db = getFirestore(app);
-
-export const auth = getAuth(app);
-export const storage = getStorage(app);
-
-export let analytics: ReturnType<typeof getAnalytics> | undefined;
-if (typeof window !== "undefined") {
-  isSupported().then(ok => { if (ok) analytics = getAnalytics(app); });
-}
-
-export const __whoami = () => ({
-  projectId: firebaseConfig.projectId,
-  authDomain: firebaseConfig.authDomain
+// AUTH
+export const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
 });
+
+// Promise que se resuelve cuando Auth ya conoce el estado del usuario
+export const authReady: Promise<void> = new Promise((resolve) => {
+  const unsub = onAuthStateChanged(auth, () => {
+    unsub();
+    resolve();
+  });
+});
+
+// FIRESTORE con transporte moderno (evita Listen/channel 400)
+export const db = initializeFirestore(app, {
+  useFetchStreams: true,
+  experimentalAutoDetectLongPolling: true,
+});
+
+// setLogLevel("debug"); // <- opcional para depurar

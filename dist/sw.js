@@ -1,1 +1,12 @@
-if(!self.define){let e,c={};const i=(i,n)=>(i=new URL(i+".js",n).href,c[i]||new Promise(c=>{if("document"in self){const e=document.createElement("script");e.src=i,e.onload=c,document.head.appendChild(e)}else e=i,importScripts(i),c()}).then(()=>{let e=c[i];if(!e)throw new Error(`Module ${i} didn’t register its module`);return e}));self.define=(n,d)=>{const r=e||("document"in self?document.currentScript.src:"")||location.href;if(c[r])return;let s={};const f=e=>i(e,r),a={module:{uri:r},exports:s,require:f};c[r]=Promise.all(n.map(e=>a[e]||f(e))).then(e=>(d(...e),s))}}define(["./workbox-5ffe50d4"],function(e){"use strict";self.skipWaiting(),e.clientsClaim(),e.precacheAndRoute([{url:"assets/index-1cR2wdZ4.js",revision:null},{url:"assets/index-DzrL7XkI.css",revision:null},{url:"index.html",revision:"4ef9627d51bfcf87154c13b78dc0e013"},{url:"maskable-512x512.png",revision:"4dac4dfd4e04af48c1c3f9c8c0d10afc"},{url:"pwa-192x192.png",revision:"4dac4dfd4e04af48c1c3f9c8c0d10afc"},{url:"pwa-512x512.png",revision:"4dac4dfd4e04af48c1c3f9c8c0d10afc"},{url:"registerSW.js",revision:"1872c500de691dce40960bb85481de07"},{url:"maskable-512x512.png",revision:"4dac4dfd4e04af48c1c3f9c8c0d10afc"},{url:"pwa-192x192.png",revision:"4dac4dfd4e04af48c1c3f9c8c0d10afc"},{url:"pwa-512x512.png",revision:"4dac4dfd4e04af48c1c3f9c8c0d10afc"},{url:"manifest.webmanifest",revision:"b68e164a716ca744848c8f459757acc1"}],{}),e.cleanupOutdatedCaches(),e.registerRoute(new e.NavigationRoute(e.createHandlerBoundToURL("index.html")))});
+// SW destructor definitivo: toma control, borra caches y se desregistra, luego recarga una vez.
+self.addEventListener('install', (e) => self.skipWaiting());
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    try { await self.clients.claim(); } catch(e){}
+    try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch(e){}
+    try { await self.registration.unregister(); } catch(e){}
+    const cs = await self.clients.matchAll({ type:'window', includeUncontrolled:true });
+    for (const c of cs) c.navigate(c.url);
+  })());
+});
+self.addEventListener('fetch', () => {});
