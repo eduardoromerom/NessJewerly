@@ -1,6 +1,6 @@
-import "./auth-init";
-import "./api/items";
 import "./live-bridge";
+import "./api/items";
+import "./auth-init";
 import "./firebase";
 import React from 'react'
 import ReactDOM from 'react-dom/client'
