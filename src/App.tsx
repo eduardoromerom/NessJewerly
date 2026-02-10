@@ -128,30 +128,42 @@ export default function App() {
   }, [q, items])
 
   async function saveDraft(e: React.FormEvent) {
-    e.preventDefault()
-    if (!draft.nombre || !draft.sku) return
+  e.preventDefault()
+  
+  console.log("=== BOTÓN AGREGAR PULSADO ===")
+  console.log("Estado actual de draft:", draft)
 
-    const id = draft.id || `p-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
-
-    const data = {
-      sku: draft.sku,
-      nombre: draft.nombre,
-      categoria: draft.categoria,
-      precio: draft.precio,
-      stock: draft.stock,
-      updatedAt: serverTimestamp(),
-      ...(draft.id ? {} : { createdAt: serverTimestamp() })
-    }
-
-    try {
-      await setDoc(doc(db, 'items', id), data, { merge: true })
-      console.log("Producto guardado:", id)
-      resetDraft()
-    } catch (err: any) {
-      console.error("Error al guardar:", err)
-      alert("Error al guardar: " + err.message)
-    }
+  if (!draft.nombre || !draft.sku) {
+    console.log("Validación falló: nombre o sku vacío")
+    alert("Debes llenar al menos Nombre y SKU")
+    return
   }
+
+  console.log("Validación pasada → generando ID")
+  const id = draft.id || `p-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+
+  const data = {
+    sku: draft.sku,
+    nombre: draft.nombre,
+    categoria: draft.categoria || '',
+    precio: draft.precio || 0,
+    stock: draft.stock || 0,
+    updatedAt: serverTimestamp(),
+    ...(draft.id ? {} : { createdAt: serverTimestamp() })
+  }
+
+  console.log("Intentando guardar en Firestore → ID:", id, "Datos:", data)
+
+  try {
+    await setDoc(doc(db, 'items', id), data, { merge: true })
+    console.log("¡Guardado exitoso! ID:", id)
+    alert("¡Producto agregado con éxito!")
+    resetDraft()
+  } catch (err: any) {
+    console.error("ERROR AL GUARDAR EN FIRESTORE:", err.code, err.message, err)
+    alert("Error al agregar: " + (err.message || "Revisa consola (F12)"))
+  }
+}
 
   async function remove(id: string) {
     if (!confirm('¿Eliminar producto?')) return
