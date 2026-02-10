@@ -8,7 +8,8 @@ import {
   doc,
   setDoc,
   deleteDoc,
-  serverTimestamp
+  serverTimestamp,
+  onSnapshot
 } from 'firebase/firestore'
 import {
   createUserWithEmailAndPassword,
@@ -54,7 +55,7 @@ const tabs = ['catalogo', 'movimientos', 'reportes', 'config', 'debug'] as const
 export default function App() {
   const [user, setUser] = useState<any>(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [tab, setTab] = useState<Tab>('catalogo') // ← Cambié a 'catalogo' por defecto para probar
+  const [tab, setTab] = useState<Tab>('catalogo') // Empieza en catálogo
   const [q, setQ] = useState('')
   const [items, setItems] = useState<Producto[]>(seed)
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
@@ -63,54 +64,56 @@ export default function App() {
   })
   const [movs, setMovs] = useState<Movimiento[]>([])
 
-  // Listener de auth
+  // Listener de autenticación
   useEffect(() => {
-    console.log("=== INICIO DEL LISTENER DE AUTH ===")
+    console.log("=== INICIANDO LISTENER DE AUTH ===")
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       console.log("onAuthStateChanged disparado")
-      console.log("Usuario detectado:", currentUser ? currentUser.uid : "NULL - NO hay usuario")
+      console.log("Usuario:", currentUser ? currentUser.uid : "NULL - NO hay usuario")
       if (currentUser) {
         console.log("Email:", currentUser.email)
       }
       setUser(currentUser)
       setLoadingAuth(false)
     }, (err) => {
-      console.error("ERROR EN AUTH LISTENER:", err)
+      console.error("ERROR EN AUTH:", err)
       setLoadingAuth(false)
     })
 
     return () => unsubscribe()
   }, [])
 
-  // Carga items desde Firestore
+  // Escucha en tiempo real de los items
   useEffect(() => {
     if (!user) return
 
-    console.log("Usuario logueado → cargando items...")
-    const loadItems = async () => {
-      try {
-        const qRef = query(collection(db, 'items'))
-        const snapshot = await getDocs(qRef)
-        const loaded = snapshot.docs.map(doc => {
-          const data = doc.data()
-          return {
-            id: doc.id,
-            sku: data.sku || '',
-            nombre: data.nombre || '',
-            categoria: data.categoria || '',
-            precio: Number(data.precio) || 0,
-            stock: Number(data.stock) || 0
-          } as Producto
-        })
-        console.log("Items cargados:", loaded.length)
-        if (loaded.length > 0) setItems(loaded)
-      } catch (err: any) {
-        console.error("Error cargando items:", err)
-        alert("No se pudo cargar el inventario")
-      }
-    }
+    console.log("Usuario logueado → escuchando cambios en tiempo real...")
 
-    loadItems()
+    const qRef = query(collection(db, 'items'))
+
+    const unsubscribe = onSnapshot(qRef, (snapshot) => {
+      const loaded = snapshot.docs.map(doc => {
+        const data = doc.data()
+        return {
+          id: doc.id,
+          sku: data.sku || '',
+          nombre: data.nombre || '',
+          categoria: data.categoria || '',
+          precio: Number(data.precio) || 0,
+          stock: Number(data.stock) || 0
+        } as Producto
+      })
+      console.log("Items actualizados:", loaded.length)
+      setItems(loaded.length > 0 ? loaded : seed)
+    }, (err) => {
+      console.error("Error en onSnapshot:", err)
+      alert("Error al sincronizar inventario")
+    })
+
+    return () => {
+      console.log("Deteniendo escucha de items")
+      unsubscribe()
+    }
   }, [user])
 
   const filtered = useMemo(() => {
@@ -123,7 +126,7 @@ export default function App() {
     )
   }, [q, items])
 
-  // Función de moneda segura
+  // Moneda segura
   const currency = (n: number | undefined | null) => {
     if (n == null || isNaN(n)) return '$0.00'
     return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -133,10 +136,9 @@ export default function App() {
     e.preventDefault()
 
     console.log("=== BOTÓN AGREGAR PULSADO ===")
-    console.log("Estado draft:", draft)
+    console.log("Draft actual:", draft)
 
     if (!draft.nombre || !draft.sku) {
-      console.log("Validación falló: nombre o sku vacío")
       alert("Nombre y SKU son obligatorios")
       return
     }
@@ -153,12 +155,12 @@ export default function App() {
       ...(draft.id ? {} : { createdAt: serverTimestamp() })
     }
 
-    console.log("Intentando guardar → ID:", id, "Datos:", data)
+    console.log("Guardando en Firestore → ID:", id)
 
     try {
       await setDoc(doc(db, 'items', id), data, { merge: true })
-      console.log("Guardado OK:", id)
-      alert("¡Producto agregado!")
+      console.log("Guardado exitoso:", id)
+      alert("Producto agregado")
       resetDraft()
     } catch (err: any) {
       console.error("ERROR AL GUARDAR:", err)
@@ -168,6 +170,7 @@ export default function App() {
 
   async function remove(id: string) {
     if (!confirm('¿Eliminar producto?')) return
+
     try {
       await deleteDoc(doc(db, 'items', id))
       console.log("Producto borrado:", id)
@@ -193,10 +196,7 @@ export default function App() {
     if (!prod) return
     const sign = mvDraft.tipo === 'entrada' ? +1 : -1
     const nuevoStock = prod.stock + sign * mvDraft.cantidad
-    if (nuevoStock < 0) {
-      alert('Stock insuficiente')
-      return
-    }
+    if (nuevoStock < 0) { alert('Stock insuficiente'); return }
 
     setItems(prev => prev.map(p => p.id === prod.id ? { ...p, stock: nuevoStock } : p))
     setMovs(prev => [
@@ -252,7 +252,7 @@ export default function App() {
           const password = (e.target as any).regPassword.value
           try {
             await createUserWithEmailAndPassword(auth, email, password)
-            alert("¡Cuenta creada!")
+            alert("¡Cuenta creada! Ahora inicia sesión.")
           } catch (err: any) {
             alert("Error: " + err.message)
           }
@@ -285,7 +285,6 @@ export default function App() {
     )
   }
 
-  // Vista logueada
   return (
     <div className="app">
       <h1>Inventario de Joyería — PWA (sincronizado)</h1>
@@ -381,8 +380,10 @@ export default function App() {
         </section>
       )}
 
-      {/* Aquí puedes agregar las otras pestañas si las tienes implementadas */}
-      {/* Movimientos, Reportes, Config... */}
+      {/* Puedes agregar aquí las otras pestañas cuando las necesites */}
+      {/* {tab === 'movimientos' && (...)} */}
+      {/* {tab === 'reportes' && (...)} */}
+      {/* {tab === 'config' && (...)} */}
 
       <div className="footer">
         <small>Sincronizado con Firebase • Usuario: {user.email}</small>
