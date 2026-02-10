@@ -9,7 +9,8 @@ import {
   deleteDoc,
   serverTimestamp,
   onSnapshot,
-  addDoc
+  addDoc,
+  Timestamp
 } from 'firebase/firestore'
 import {
   createUserWithEmailAndPassword,
@@ -27,6 +28,8 @@ type Producto = {
   categoria: string
   precio: number
   stock: number
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
 }
 
 type Movimiento = {
@@ -34,7 +37,7 @@ type Movimiento = {
   productoId: string
   tipo: 'entrada' | 'salida'
   cantidad: number
-  fecha: Date
+  fecha: Timestamp
   nota?: string
 }
 
@@ -57,21 +60,9 @@ export default function App() {
   const [items, setItems] = useState<Producto[]>(seed)
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
-    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date(), nota: ''
+    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: Timestamp.now(), nota: ''
   })
   const [movs, setMovs] = useState<Movimiento[]>([])
-
-  // Definiciones que deben estar antes del return
-  const LOW = 5
-  const lowStock = useMemo(() => 
-    items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock),
-    [items]
-  )
-
-  const currency = (n: number | undefined | null) => {
-    if (n == null || isNaN(n)) return '$0.00'
-    return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
 
   // Auth listener
   useEffect(() => {
@@ -124,6 +115,17 @@ export default function App() {
       p.categoria.toLowerCase().includes(term)
     )
   }, [q, items])
+
+  const LOW = 5
+  const lowStock = useMemo(() => 
+    items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock),
+    [items]
+  )
+
+  const currency = (n: number | undefined | null) => {
+    if (n == null || isNaN(n)) return '$0.00'
+    return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
 
   async function saveDraft(e: React.FormEvent) {
     e.preventDefault()
@@ -201,29 +203,56 @@ export default function App() {
     }
   }
 
-  function resetAll() {
-    if (!confirm('¿Borrar TODO?')) return
-    setItems(seed)
-    setMovs([])
-  }
-
   function descargarInventario() {
-    const timestamp = new Date().toLocaleString('es-MX')
-    const data = items.map(item => ({
-      ID: item.id,
-      SKU: item.sku,
-      Nombre: item.nombre,
-      Categoria: item.categoria,
-      Precio: item.precio,
-      Stock: item.stock,
-      Timestamp: timestamp
-    }))
+    const data = items.map(item => {
+      let fechaCreacion = 'Sin fecha'
+
+      if (item.createdAt && item.createdAt.toDate) {
+        const date = item.createdAt.toDate()
+        fechaCreacion = date.toLocaleString('es-MX', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
+      }
+
+      return {
+        ID: item.id,
+        SKU: item.sku,
+        Nombre: item.nombre,
+        Categoria: item.categoria,
+        Precio: item.precio,
+        Stock: item.stock,
+        'Fecha de creación': fechaCreacion
+      }
+    })
+
+    // Nombre con fecha y hora
+    const now = new Date()
+    const fechaHora = now.toLocaleString('es-MX', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).replace(/[\/: ]/g, '-')
+
+    const nombreArchivo = `inventario_${fechaHora}.xlsx`
 
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
-    XLSX.writeFile(wb, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`)
-    alert("Inventario descargado")
+    XLSX.writeFile(wb, nombreArchivo)
+    alert(`Inventario descargado como:\n${nombreArchivo}`)
+  }
+
+  function resetAll() {
+    if (!confirm('¿Borrar TODO?')) return
+    setItems(seed)
+    setMovs([])
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
