@@ -41,6 +41,9 @@ type Movimiento = {
 
 type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
 
+const K_ITEMS = 'inv.joyeria.items.v1'
+const K_MOVS = 'inv.joyeria.movs.v1'
+
 const seed: Producto[] = [
   { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', precio: 850, stock: 12 },
   { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', precio: 5200, stock: 3 },
@@ -56,11 +59,23 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('catalogo')
   const [q, setQ] = useState('')
   const [items, setItems] = useState<Producto[]>(seed)
-  const [movs, setMovs] = useState<Movimiento[]>([])
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
     id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date(), nota: ''
   })
+  const [movs, setMovs] = useState<Movimiento[]>([])
+
+  // Definimos LOW y lowStock aquí (antes del return)
+  const LOW = 5
+  const lowStock = useMemo(() => 
+    items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock),
+    [items]
+  )
+
+  const currency = (n: number | undefined | null) => {
+    if (n == null || isNaN(n)) return '$0.00'
+    return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
 
   // Auth listener
   useEffect(() => {
@@ -73,7 +88,7 @@ export default function App() {
     return () => unsubscribe()
   }, [])
 
-  // Carga y escucha productos en tiempo real
+  // Escucha productos en tiempo real
   useEffect(() => {
     if (!user) return
 
@@ -83,14 +98,13 @@ export default function App() {
         id: d.id,
         ...d.data()
       } as Producto))
-      console.log("Productos actualizados:", loaded.length)
       setItems(loaded.length > 0 ? loaded : seed)
     })
 
     return () => unsubscribeProducts()
   }, [user])
 
-  // Carga y escucha movimientos en tiempo real
+  // Escucha movimientos en tiempo real
   useEffect(() => {
     if (!user) return
 
@@ -101,7 +115,6 @@ export default function App() {
         ...d.data(),
         fecha: d.data().fecha?.toDate ? d.data().fecha.toDate() : new Date(d.data().fecha)
       } as Movimiento))
-      console.log("Movimientos actualizados:", loaded.length)
       setMovs(loaded)
     })
 
@@ -117,16 +130,6 @@ export default function App() {
       p.categoria.toLowerCase().includes(term)
     )
   }, [q, items])
-
-  const lowStock = useMemo(() => 
-    items.filter(p => p.stock <= 5).sort((a, b) => a.stock - b.stock),
-    [items]
-  )
-
-  const currency = (n: number | undefined | null) => {
-    if (n == null || isNaN(n)) return '$0.00'
-    return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
 
   async function saveDraft(e: React.FormEvent) {
     e.preventDefault()
@@ -152,7 +155,6 @@ export default function App() {
       alert("Producto guardado")
       resetDraft()
     } catch (err: any) {
-      console.error("Error guardando producto:", err)
       alert("Error al guardar: " + err.message)
     }
   }
@@ -190,10 +192,7 @@ export default function App() {
     }
 
     try {
-      // Actualizar stock del producto
       await setDoc(doc(db, 'items', prod.id), { stock: nuevoStock }, { merge: true })
-
-      // Guardar movimiento
       await addDoc(collection(db, 'movimientos'), {
         productoId: mvDraft.productoId,
         tipo: mvDraft.tipo,
@@ -201,12 +200,10 @@ export default function App() {
         fecha: serverTimestamp(),
         nota: mvDraft.nota || ''
       })
-
       alert("Movimiento registrado")
       setMvDraft({ id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date(), nota: '' })
     } catch (err: any) {
-      console.error("Error en movimiento:", err)
-      alert("Error al registrar movimiento")
+      alert("Error en movimiento: " + err.message)
     }
   }
 
@@ -226,13 +223,13 @@ export default function App() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
     XLSX.writeFile(wb, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`)
-    alert("Inventario descargado")
+    alert("¡Descargado!")
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
 
   if (!user) {
-    // pantalla de login/registro (la misma de antes)
+    // Pantalla de login/registro (la misma de antes)
     return (
       <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
         <h1 style={{ textAlign: 'center' }}>Inventario de Joyería</h1>
