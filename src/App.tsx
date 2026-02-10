@@ -9,7 +9,8 @@ import {
   setDoc,
   deleteDoc,
   serverTimestamp,
-  onSnapshot
+  onSnapshot,
+  addDoc
 } from 'firebase/firestore'
 import {
   createUserWithEmailAndPassword,
@@ -34,14 +35,11 @@ type Movimiento = {
   productoId: string
   tipo: 'entrada' | 'salida'
   cantidad: number
-  fecha: string
+  fecha: Date
   nota?: string
 }
 
 type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
-
-const K_ITEMS = 'inv.joyeria.items.v1'
-const K_MOVS = 'inv.joyeria.movs.v1'
 
 const seed: Producto[] = [
   { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', precio: 850, stock: 12 },
@@ -55,78 +53,76 @@ const tabs = ['catalogo', 'movimientos', 'reportes', 'config', 'debug'] as const
 export default function App() {
   const [user, setUser] = useState<any>(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [tab, setTab] = useState<Tab>('catalogo') // Empieza en catálogo
+  const [tab, setTab] = useState<Tab>('catalogo')
   const [q, setQ] = useState('')
   const [items, setItems] = useState<Producto[]>(seed)
+  const [movs, setMovs] = useState<Movimiento[]>([])
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
-    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date().toISOString(), nota: ''
+    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date(), nota: ''
   })
-  const [movs, setMovs] = useState<Movimiento[]>([])
 
-  // Listener de autenticación
+  // Auth listener
   useEffect(() => {
-    console.log("=== INICIANDO LISTENER DE AUTH ===")
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      console.log("onAuthStateChanged disparado")
-      console.log("Usuario:", currentUser ? currentUser.uid : "NULL - NO hay usuario")
-      if (currentUser) {
-        console.log("Email:", currentUser.email)
-      }
-      setUser(currentUser)
-      setLoadingAuth(false)
-    }, (err) => {
-      console.error("ERROR EN AUTH:", err)
+    console.log("Iniciando listener de auth...")
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      console.log("Auth cambiado:", u ? u.uid : "null")
+      setUser(u)
       setLoadingAuth(false)
     })
-
     return () => unsubscribe()
   }, [])
 
-  // Escucha en tiempo real de los items
+  // Carga y escucha productos en tiempo real
   useEffect(() => {
     if (!user) return
 
-    console.log("Usuario logueado → escuchando cambios en tiempo real...")
-
-    const qRef = query(collection(db, 'items'))
-
-    const unsubscribe = onSnapshot(qRef, (snapshot) => {
-      const loaded = snapshot.docs.map(doc => {
-        const data = doc.data()
-        return {
-          id: doc.id,
-          sku: data.sku || '',
-          nombre: data.nombre || '',
-          categoria: data.categoria || '',
-          precio: Number(data.precio) || 0,
-          stock: Number(data.stock) || 0
-        } as Producto
-      })
-      console.log("Items actualizados:", loaded.length)
+    const qProducts = query(collection(db, 'items'))
+    const unsubscribeProducts = onSnapshot(qProducts, (snap) => {
+      const loaded = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      } as Producto))
+      console.log("Productos actualizados:", loaded.length)
       setItems(loaded.length > 0 ? loaded : seed)
-    }, (err) => {
-      console.error("Error en onSnapshot:", err)
-      alert("Error al sincronizar inventario")
     })
 
-    return () => {
-      console.log("Deteniendo escucha de items")
-      unsubscribe()
-    }
+    return () => unsubscribeProducts()
+  }, [user])
+
+  // Carga y escucha movimientos en tiempo real
+  useEffect(() => {
+    if (!user) return
+
+    const qMovs = query(collection(db, 'movimientos'))
+    const unsubscribeMovs = onSnapshot(qMovs, (snap) => {
+      const loaded = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        fecha: d.data().fecha?.toDate ? d.data().fecha.toDate() : new Date(d.data().fecha)
+      } as Movimiento))
+      console.log("Movimientos actualizados:", loaded.length)
+      setMovs(loaded)
+    })
+
+    return () => unsubscribeMovs()
   }, [user])
 
   const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase()
-    if (!t) return items
+    const term = q.trim().toLowerCase()
+    if (!term) return items
     return items.filter(p =>
-      p.nombre.toLowerCase().includes(t) ||
-      p.sku.toLowerCase().includes(t) ||
-      p.categoria.toLowerCase().includes(t)
+      p.nombre.toLowerCase().includes(term) ||
+      p.sku.toLowerCase().includes(term) ||
+      p.categoria.toLowerCase().includes(term)
     )
   }, [q, items])
 
-  // Moneda segura
+  const lowStock = useMemo(() => 
+    items.filter(p => p.stock <= 5).sort((a, b) => a.stock - b.stock),
+    [items]
+  )
+
   const currency = (n: number | undefined | null) => {
     if (n == null || isNaN(n)) return '$0.00'
     return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -134,16 +130,12 @@ export default function App() {
 
   async function saveDraft(e: React.FormEvent) {
     e.preventDefault()
-
-    console.log("=== BOTÓN AGREGAR PULSADO ===")
-    console.log("Draft actual:", draft)
-
     if (!draft.nombre || !draft.sku) {
       alert("Nombre y SKU son obligatorios")
       return
     }
 
-    const id = draft.id || `p-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+    const id = draft.id || `p-${Date.now()}`
 
     const data = {
       sku: draft.sku,
@@ -155,28 +147,22 @@ export default function App() {
       ...(draft.id ? {} : { createdAt: serverTimestamp() })
     }
 
-    console.log("Guardando en Firestore → ID:", id)
-
     try {
       await setDoc(doc(db, 'items', id), data, { merge: true })
-      console.log("Guardado exitoso:", id)
-      alert("Producto agregado")
+      alert("Producto guardado")
       resetDraft()
     } catch (err: any) {
-      console.error("ERROR AL GUARDAR:", err)
+      console.error("Error guardando producto:", err)
       alert("Error al guardar: " + err.message)
     }
   }
 
   async function remove(id: string) {
-    if (!confirm('¿Eliminar producto?')) return
-
+    if (!confirm('¿Eliminar?')) return
     try {
       await deleteDoc(doc(db, 'items', id))
-      console.log("Producto borrado:", id)
     } catch (err: any) {
-      console.error("Error al borrar:", err)
-      alert("Error al borrar")
+      alert("Error al eliminar")
     }
   }
 
@@ -189,32 +175,39 @@ export default function App() {
     setTab('catalogo')
   }
 
-  function applyMovimiento(e: React.FormEvent) {
+  async function applyMovimiento(e: React.FormEvent) {
     e.preventDefault()
     if (!mvDraft.productoId || mvDraft.cantidad <= 0) return
+
     const prod = items.find(p => p.id === mvDraft.productoId)
     if (!prod) return
-    const sign = mvDraft.tipo === 'entrada' ? +1 : -1
+
+    const sign = mvDraft.tipo === 'entrada' ? 1 : -1
     const nuevoStock = prod.stock + sign * mvDraft.cantidad
-    if (nuevoStock < 0) { alert('Stock insuficiente'); return }
+    if (nuevoStock < 0) {
+      alert('Stock insuficiente')
+      return
+    }
 
-    setItems(prev => prev.map(p => p.id === prod.id ? { ...p, stock: nuevoStock } : p))
-    setMovs(prev => [
-      { ...mvDraft, id: `m-${Math.random().toString(36).slice(2,9)}`, fecha: new Date().toISOString() },
-      ...prev
-    ])
-    setMvDraft({ id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date().toISOString(), nota: '' })
-  }
+    try {
+      // Actualizar stock del producto
+      await setDoc(doc(db, 'items', prod.id), { stock: nuevoStock }, { merge: true })
 
-  const LOW = 5
-  const lowStock = useMemo(() => items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock), [items])
+      // Guardar movimiento
+      await addDoc(collection(db, 'movimientos'), {
+        productoId: mvDraft.productoId,
+        tipo: mvDraft.tipo,
+        cantidad: mvDraft.cantidad,
+        fecha: serverTimestamp(),
+        nota: mvDraft.nota || ''
+      })
 
-  function resetAll() {
-    if (!confirm('¿Borrar TODO?')) return
-    setItems(seed)
-    setMovs([])
-    localStorage.removeItem(K_ITEMS)
-    localStorage.removeItem(K_MOVS)
+      alert("Movimiento registrado")
+      setMvDraft({ id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date(), nota: '' })
+    } catch (err: any) {
+      console.error("Error en movimiento:", err)
+      alert("Error al registrar movimiento")
+    }
   }
 
   function descargarInventario() {
@@ -233,14 +226,13 @@ export default function App() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
     XLSX.writeFile(wb, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`)
-    alert("¡Descargado!")
+    alert("Inventario descargado")
   }
 
-  if (loadingAuth) {
-    return <div style={{ padding: '100px', textAlign: 'center' }}>Verificando sesión...</div>
-  }
+  if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
 
   if (!user) {
+    // pantalla de login/registro (la misma de antes)
     return (
       <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
         <h1 style={{ textAlign: 'center' }}>Inventario de Joyería</h1>
@@ -252,7 +244,7 @@ export default function App() {
           const password = (e.target as any).regPassword.value
           try {
             await createUserWithEmailAndPassword(auth, email, password)
-            alert("¡Cuenta creada! Ahora inicia sesión.")
+            alert("Cuenta creada")
           } catch (err: any) {
             alert("Error: " + err.message)
           }
@@ -271,7 +263,7 @@ export default function App() {
           const password = (e.target as any).loginPassword.value
           try {
             await signInWithEmailAndPassword(auth, email, password)
-            alert("¡Sesión iniciada!")
+            alert("Sesión iniciada")
           } catch (err: any) {
             alert("Error: " + err.message)
           }
@@ -380,10 +372,110 @@ export default function App() {
         </section>
       )}
 
-      {/* Puedes agregar aquí las otras pestañas cuando las necesites */}
-      {/* {tab === 'movimientos' && (...)} */}
-      {/* {tab === 'reportes' && (...)} */}
-      {/* {tab === 'config' && (...)} */}
+      {tab === 'movimientos' && (
+        <section className="card">
+          <h2>Movimientos</h2>
+          <form onSubmit={applyMovimiento} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(6, 1fr)' }}>
+            <div style={{ gridColumn: 'span 2' }}>
+              <label>Producto</label>
+              <select value={mvDraft.productoId} onChange={e => setMvDraft({ ...mvDraft, productoId: e.target.value })} required>
+                <option value="">— Selecciona —</option>
+                {items.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre} · {p.sku} (stock {p.stock})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Tipo</label>
+              <select value={mvDraft.tipo} onChange={e => setMvDraft({ ...mvDraft, tipo: e.target.value as 'entrada' | 'salida' })}>
+                <option value="entrada">Entrada</option>
+                <option value="salida">Salida</option>
+              </select>
+            </div>
+            <div>
+              <label>Cantidad</label>
+              <input type="number" min={1} value={mvDraft.cantidad} onChange={e => setMvDraft({ ...mvDraft, cantidad: Number(e.target.value) })} required />
+            </div>
+            <div style={{ gridColumn: 'span 2' }}>
+              <label>Nota (opcional)</label>
+              <input value={mvDraft.nota || ''} onChange={e => setMvDraft({ ...mvDraft, nota: e.target.value })} placeholder="Cliente, reparación, etc." />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'end' }}>
+              <button className="tab" type="submit">Aplicar movimiento</button>
+            </div>
+          </form>
+          <hr />
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Producto</th>
+                <th>Tipo</th>
+                <th>Cantidad</th>
+                <th>Nota</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movs.map(m => {
+                const prod = items.find(p => p.id === m.productoId)
+                return (
+                  <tr key={m.id}>
+                    <td>{m.fecha.toLocaleString()}</td>
+                    <td>{prod ? `${prod.nombre} (${prod.sku})` : 'Producto eliminado'}</td>
+                    <td>{m.tipo}</td>
+                    <td>{m.cantidad}</td>
+                    <td>{m.nota || '—'}</td>
+                  </tr>
+                )
+              })}
+              {movs.length === 0 && <tr><td colSpan={5}>No hay movimientos registrados.</td></tr>}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {tab === 'reportes' && (
+        <section className="card">
+          <h2>Reportes</h2>
+          <h3>Stock bajo (≤ {LOW})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>SKU</th>
+                <th>Stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lowStock.map(p => (
+                <tr key={p.id}>
+                  <td>{p.nombre}</td>
+                  <td>{p.sku}</td>
+                  <td>{p.stock}</td>
+                </tr>
+              ))}
+              {lowStock.length === 0 && <tr><td colSpan={3}>No hay productos con stock bajo.</td></tr>}
+            </tbody>
+          </table>
+
+          <button 
+            className="tab" 
+            onClick={descargarInventario} 
+            style={{ marginTop: '20px', padding: '10px 20px' }}
+          >
+            Descargar inventario en Excel
+          </button>
+        </section>
+      )}
+
+      {tab === 'config' && (
+        <section className="card">
+          <h2>Configuración</h2>
+          <button className="tab" onClick={resetAll}>Borrar TODO (solo desarrollo)</button>
+        </section>
+      )}
 
       <div className="footer">
         <small>Sincronizado con Firebase • Usuario: {user.email}</small>
