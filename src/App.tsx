@@ -3,7 +3,6 @@ import './index.css'
 import TestFirebase from './components/TestFirebase'
 import {
   collection,
-  getDocs,
   query,
   doc,
   setDoc,
@@ -41,9 +40,6 @@ type Movimiento = {
 
 type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
 
-const K_ITEMS = 'inv.joyeria.items.v1'
-const K_MOVS = 'inv.joyeria.movs.v1'
-
 const seed: Producto[] = [
   { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', precio: 850, stock: 12 },
   { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', precio: 5200, stock: 3 },
@@ -65,7 +61,7 @@ export default function App() {
   })
   const [movs, setMovs] = useState<Movimiento[]>([])
 
-  // Definimos LOW y lowStock aquí (antes del return)
+  // Definiciones que deben estar antes del return
   const LOW = 5
   const lowStock = useMemo(() => 
     items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock),
@@ -79,21 +75,19 @@ export default function App() {
 
   // Auth listener
   useEffect(() => {
-    console.log("Iniciando listener de auth...")
     const unsubscribe = onAuthStateChanged(auth, (u) => {
-      console.log("Auth cambiado:", u ? u.uid : "null")
       setUser(u)
       setLoadingAuth(false)
     })
     return () => unsubscribe()
   }, [])
 
-  // Escucha productos en tiempo real
+  // Productos en tiempo real
   useEffect(() => {
     if (!user) return
 
     const qProducts = query(collection(db, 'items'))
-    const unsubscribeProducts = onSnapshot(qProducts, (snap) => {
+    const unsubscribe = onSnapshot(qProducts, (snap) => {
       const loaded = snap.docs.map(d => ({
         id: d.id,
         ...d.data()
@@ -101,15 +95,15 @@ export default function App() {
       setItems(loaded.length > 0 ? loaded : seed)
     })
 
-    return () => unsubscribeProducts()
+    return () => unsubscribe()
   }, [user])
 
-  // Escucha movimientos en tiempo real
+  // Movimientos en tiempo real
   useEffect(() => {
     if (!user) return
 
     const qMovs = query(collection(db, 'movimientos'))
-    const unsubscribeMovs = onSnapshot(qMovs, (snap) => {
+    const unsubscribe = onSnapshot(qMovs, (snap) => {
       const loaded = snap.docs.map(d => ({
         id: d.id,
         ...d.data(),
@@ -118,7 +112,7 @@ export default function App() {
       setMovs(loaded)
     })
 
-    return () => unsubscribeMovs()
+    return () => unsubscribe()
   }, [user])
 
   const filtered = useMemo(() => {
@@ -207,6 +201,12 @@ export default function App() {
     }
   }
 
+  function resetAll() {
+    if (!confirm('¿Borrar TODO?')) return
+    setItems(seed)
+    setMovs([])
+  }
+
   function descargarInventario() {
     const timestamp = new Date().toLocaleString('es-MX')
     const data = items.map(item => ({
@@ -223,13 +223,12 @@ export default function App() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
     XLSX.writeFile(wb, `inventario_${new Date().toISOString().slice(0,10)}.xlsx`)
-    alert("¡Descargado!")
+    alert("Inventario descargado")
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
 
   if (!user) {
-    // Pantalla de login/registro (la misma de antes)
     return (
       <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
         <h1 style={{ textAlign: 'center' }}>Inventario de Joyería</h1>
