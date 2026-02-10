@@ -63,49 +63,54 @@ export default function App() {
   })
   const [movs, setMovs] = useState<Movimiento[]>([])
 
-  // Listener de auth - versión reforzada con logs y manejo de error
+  // Listener de auth - con logs reforzados
   useEffect(() => {
     console.log("=== INICIO DEL LISTENER DE AUTH ===")
-    console.log("Estado inicial de loadingAuth:", loadingAuth)
+    console.log("Estado inicial loadingAuth:", loadingAuth)
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       console.log("onAuthStateChanged disparado a las:", new Date().toLocaleTimeString())
-      console.log("Usuario detectado:", currentUser ? currentUser.uid : "NULL - NO hay usuario logueado")
+      console.log("Usuario detectado:", currentUser ? currentUser.uid : "NULL - NO hay usuario")
       if (currentUser) {
         console.log("Email:", currentUser.email)
-        console.log("Proveedor:", currentUser.providerData?.[0]?.providerId || "desconocido")
       }
       setUser(currentUser)
       setLoadingAuth(false)
       console.log("loadingAuth cambiado a false")
-    }, (err) => {
-      console.error("ERROR EN AUTH LISTENER:", err.code, err.message, err)
-      setLoadingAuth(false) // forzamos a que termine el loading aunque falle
+    }, (err: any) => {
+      console.error("ERROR EN AUTH:", err.code, err.message, err)
+      setLoadingAuth(false) // forzamos para que muestre login aunque falle
     })
 
-    return () => {
-      console.log("Limpiando listener de auth")
-      unsubscribe()
-    }
+    return () => unsubscribe()
   }, [])
 
-  // Carga de items
+  // Carga items - con manejo de error visible
   useEffect(() => {
-    if (!user) return
+    if (!user) {
+      console.log("No hay usuario → no se cargan items")
+      return
+    }
 
-    console.log("Usuario logueado → cargando items...")
+    console.log("Usuario logueado → intentando cargar items...")
     const loadItems = async () => {
       try {
+        console.log("Ejecutando query a Firestore...")
         const qRef = query(collection(db, 'items'))
         const snapshot = await getDocs(qRef)
         const loaded = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Producto[]
-        console.log("Items cargados desde Firestore:", loaded.length)
-        if (loaded.length > 0) setItems(loaded)
+        console.log("Items cargados exitosamente:", loaded.length, loaded)
+        if (loaded.length > 0) {
+          setItems(loaded)
+        } else {
+          console.log("Firestore está vacío → usando seed")
+        }
       } catch (err: any) {
-        console.error("Error cargando items:", err.code, err.message)
+        console.error("ERROR AL CARGAR ITEMS:", err.code, err.message, err)
+        alert("Error al cargar el inventario: " + err.message)
       }
     }
 
@@ -143,8 +148,8 @@ export default function App() {
       console.log("Producto guardado:", id)
       resetDraft()
     } catch (err: any) {
-      console.error("Error al guardar:", err.code, err.message)
-      alert("Error al guardar")
+      console.error("Error al guardar:", err)
+      alert("Error al guardar: " + err.message)
     }
   }
 
@@ -155,8 +160,8 @@ export default function App() {
       await deleteDoc(doc(db, 'items', id))
       console.log("Producto borrado:", id)
     } catch (err: any) {
-      console.error("Error al borrar:", err.code, err.message)
-      alert("Error al borrar")
+      console.error("Error al borrar:", err)
+      alert("Error al borrar: " + err.message)
     }
   }
 
@@ -213,12 +218,10 @@ export default function App() {
     alert("¡Inventario descargado!")
   }
 
-  // Renderizado
   if (loadingAuth) {
     return <div style={{ padding: '100px', textAlign: 'center', fontSize: '1.5em' }}>Verificando sesión...</div>
   }
 
-  // Pantalla de login/registro si NO hay usuario
   if (!user) {
     return (
       <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
@@ -235,7 +238,7 @@ export default function App() {
               alert("¡Cuenta creada! Ahora inicia sesión.")
             } catch (err: any) {
               alert("Error al crear: " + err.message)
-              console.error("Error registro:", err.code, err.message)
+              console.error("Error registro:", err)
             }
           }}
           style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}
@@ -258,7 +261,7 @@ export default function App() {
               alert("¡Sesión iniciada!")
             } catch (err: any) {
               alert("Error al iniciar: " + err.message)
-              console.error("Error login:", err.code, err.message)
+              console.error("Error login:", err)
             }
           }}
           style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}
