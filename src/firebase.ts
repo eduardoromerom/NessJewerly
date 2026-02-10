@@ -1,30 +1,19 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+// src/firebase.ts (o firebase-init.ts)
+import { initializeApp, getApps, getApp } from 'firebase/app'
+import { getAuth } from 'firebase/auth'
+import { getFirestore } from 'firebase/firestore'
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
-};
-
-// 🔒 evita inicializar Firebase más de una vez
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-
-// 🧪 helper SOLO para debug en producción
-if (typeof window !== "undefined") {
-  (window as any).__whoami = () => ({
-    projectId: firebaseConfig.projectId,
-    authDomain: firebaseConfig.authDomain,
-    appId: firebaseConfig.appId,
-  });
-
-  console.log("[firebase] conectado a:", firebaseConfig.projectId);
+  apiKey: "AIzaSyA8or2Uv80v1DQ2UzA0yuIIvxScctxJvPg",          // ← aquí va tu apiKey REAL
+  authDomain: "ness-e6877.firebaseapp.com",
+  projectId: "ness-e6877",
+  storageBucket: "ness-e6877.appspot.com",
+  messagingSenderId: "94128190545",
+  appId: "1:94128190545:web:6dc48d82b7682da7c3b470"
 }
+
+// Inicialización singleton
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+
+export const auth = getAuth(app)
+export const db = getFirestore(app)

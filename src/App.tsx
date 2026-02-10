@@ -1,5 +1,23 @@
 import { useMemo, useState, useEffect } from 'react'
 import './index.css'
+import TestFirebase from './components/TestFirebase'
+import {
+  collection,
+  getDocs,
+  query,
+  doc,
+  setDoc,
+  deleteDoc,
+  serverTimestamp
+} from 'firebase/firestore'
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut
+} from 'firebase/auth'
+import { auth, db } from './firebase'
+import * as XLSX from 'xlsx'
 
 type Producto = {
   id: string
@@ -19,47 +37,81 @@ type Movimiento = {
   nota?: string
 }
 
-type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config'
+type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
 
-// Claves de almacenamiento local
 const K_ITEMS = 'inv.joyeria.items.v1'
-const K_MOVS  = 'inv.joyeria.movs.v1'
+const K_MOVS = 'inv.joyeria.movs.v1'
 
-// Datos de ejemplo para arrancar
 const seed: Producto[] = [
   { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', precio: 850, stock: 12 },
   { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', precio: 5200, stock: 3 },
   { id: 'p-003', sku: 'ARE-ACERO-003', nombre: 'Aretes acero', categoria: 'Aretes', precio: 250, stock: 22 },
 ]
 
-// Helper para capitalizar sin que TypeScript se queje con noUncheckedIndexedAccess
 const ucFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-const tabs = ['catalogo','movimientos','reportes','config'] as const
+const tabs = ['catalogo', 'movimientos', 'reportes', 'config', 'debug'] as const
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('catalogo')
-
-  // --- Estado de Catálogo ---
-  const [q, setQ] = useState('') // búsqueda
-  const [items, setItems] = useState<Producto[]>(() => {
-    try {
-      const raw = localStorage.getItem(K_ITEMS)
-      const parsed = raw ? (JSON.parse(raw) as Producto[]) : null
-      return parsed?.length ? parsed : seed
-    } catch {
-      return seed
-    }
+  const [user, setUser] = useState<any>(null)
+  const [loadingAuth, setLoadingAuth] = useState(true)
+  const [tab, setTab] = useState<Tab>('debug')
+  const [q, setQ] = useState('')
+  const [items, setItems] = useState<Producto[]>(seed)
+  const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
+  const [mvDraft, setMvDraft] = useState<Movimiento>({
+    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date().toISOString(), nota: ''
   })
+  const [movs, setMovs] = useState<Movimiento[]>([])
+
+  // Listener de auth - versión reforzada con logs y manejo de error
   useEffect(() => {
-    try { localStorage.setItem(K_ITEMS, JSON.stringify(items)) } catch {}
-  }, [items])
+    console.log("=== INICIO DEL LISTENER DE AUTH ===")
+    console.log("Estado inicial de loadingAuth:", loadingAuth)
 
-  // draft del formulario de producto
-  const [draft, setDraft] = useState<Producto>({
-    id:'', sku:'', nombre:'', categoria:'', precio:0, stock:0
-  })
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      console.log("onAuthStateChanged disparado a las:", new Date().toLocaleTimeString())
+      console.log("Usuario detectado:", currentUser ? currentUser.uid : "NULL - NO hay usuario logueado")
+      if (currentUser) {
+        console.log("Email:", currentUser.email)
+        console.log("Proveedor:", currentUser.providerData?.[0]?.providerId || "desconocido")
+      }
+      setUser(currentUser)
+      setLoadingAuth(false)
+      console.log("loadingAuth cambiado a false")
+    }, (err) => {
+      console.error("ERROR EN AUTH LISTENER:", err.code, err.message, err)
+      setLoadingAuth(false) // forzamos a que termine el loading aunque falle
+    })
 
-  // filtrado por búsqueda (nombre, SKU, categoría)
+    return () => {
+      console.log("Limpiando listener de auth")
+      unsubscribe()
+    }
+  }, [])
+
+  // Carga de items
+  useEffect(() => {
+    if (!user) return
+
+    console.log("Usuario logueado → cargando items...")
+    const loadItems = async () => {
+      try {
+        const qRef = query(collection(db, 'items'))
+        const snapshot = await getDocs(qRef)
+        const loaded = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Producto[]
+        console.log("Items cargados desde Firestore:", loaded.length)
+        if (loaded.length > 0) setItems(loaded)
+      } catch (err: any) {
+        console.error("Error cargando items:", err.code, err.message)
+      }
+    }
+
+    loadItems()
+  }, [user])
+
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase()
     if (!t) return items
@@ -70,47 +122,48 @@ export default function App() {
     )
   }, [q, items])
 
-  // CRUD de productos
-  function resetDraft(){ setDraft({ id:'', sku:'', nombre:'', categoria:'', precio:0, stock:0 }) }
-  function edit(p:Producto){ setDraft(p); setTab('catalogo') }
-  function remove(id:string){
-    if (!confirm('¿Eliminar producto?')) return
-    setItems(prev => prev.filter(p=>p.id!==id))
-    // (opcional) limpieza de movimientos relacionados
-    setMovs(prev => prev.filter(m => m.productoId !== id))
-  }
-  function saveDraft(e:React.FormEvent){
+  async function saveDraft(e: React.FormEvent) {
     e.preventDefault()
     if (!draft.nombre || !draft.sku) return
-    const id = draft.id || `p-${Math.random().toString(36).slice(2,7)}`
-    setItems(prev => draft.id
-      ? prev.map(p => p.id===draft.id ? { ...draft, id } : p) // edición
-      : [{ ...draft, id }, ...prev]                           // alta
-    )
-    resetDraft()
+
+    const id = draft.id || `p-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+
+    const data = {
+      sku: draft.sku,
+      nombre: draft.nombre,
+      categoria: draft.categoria,
+      precio: draft.precio,
+      stock: draft.stock,
+      updatedAt: serverTimestamp(),
+      ...(draft.id ? {} : { createdAt: serverTimestamp() })
+    }
+
+    try {
+      await setDoc(doc(db, 'items', id), data, { merge: true })
+      console.log("Producto guardado:", id)
+      resetDraft()
+    } catch (err: any) {
+      console.error("Error al guardar:", err.code, err.message)
+      alert("Error al guardar")
+    }
   }
 
-  // --- Estado de Movimientos ---
-  const [movs, setMovs] = useState<Movimiento[]>(() => {
+  async function remove(id: string) {
+    if (!confirm('¿Eliminar producto?')) return
+
     try {
-      const raw = localStorage.getItem(K_MOVS)
-      return raw ? (JSON.parse(raw) as Movimiento[]) : []
-    } catch {
-      return []
+      await deleteDoc(doc(db, 'items', id))
+      console.log("Producto borrado:", id)
+    } catch (err: any) {
+      console.error("Error al borrar:", err.code, err.message)
+      alert("Error al borrar")
     }
-  })
-  useEffect(() => {
-    try { localStorage.setItem(K_MOVS, JSON.stringify(movs)) } catch {}
-  }, [movs])
+  }
 
-  // draft de movimiento (entrada/salida)
-  const [mvDraft, setMvDraft] = useState<Movimiento>({
-    id:'', productoId:'', tipo:'entrada', cantidad:1,
-    fecha:new Date().toISOString(), nota:''
-  })
+  function resetDraft() { setDraft({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 }) }
+  function edit(p: Producto) { setDraft(p); setTab('catalogo') }
 
-  // aplicar movimiento = ajustar stock + registrar historial
-  function applyMovimiento(e:React.FormEvent){
+  function applyMovimiento(e: React.FormEvent) {
     e.preventDefault()
     if (!mvDraft.productoId || mvDraft.cantidad <= 0) return
     const prod = items.find(p => p.id === mvDraft.productoId)
@@ -119,27 +172,19 @@ export default function App() {
     const nuevoStock = prod.stock + sign * mvDraft.cantidad
     if (nuevoStock < 0) { alert('Stock insuficiente para salida'); return }
 
-    // 1) actualizamos stock
-    setItems(prev => prev.map(p => p.id===prod.id ? { ...p, stock: nuevoStock } : p))
-    // 2) registramos movimiento
+    setItems(prev => prev.map(p => p.id === prod.id ? { ...p, stock: nuevoStock } : p))
     setMovs(prev => [
       { ...mvDraft, id: `m-${Math.random().toString(36).slice(2,9)}`, fecha: new Date().toISOString() },
       ...prev
     ])
-    // 3) limpiamos formulario
-    setMvDraft({ id:'', productoId:'', tipo:'entrada', cantidad:1, fecha:new Date().toISOString(), nota:'' })
+    setMvDraft({ id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date().toISOString(), nota: '' })
   }
 
-  // --- Reporte rápido: stock bajo ---
   const LOW = 5
-  const lowStock = useMemo(
-    () => items.filter(p => p.stock <= LOW).sort((a,b)=>a.stock-b.stock),
-    [items]
-  )
+  const lowStock = useMemo(() => items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock), [items])
+  const currency = (n: number) => `$${n.toLocaleString()}`
 
-  const currency = (n:number) => `$${n.toLocaleString()}`
-
-  function resetAll(){
+  function resetAll() {
     if (!confirm('¿Borrar TODO (catálogo y movimientos)?')) return
     setItems(seed)
     setMovs([])
@@ -147,67 +192,156 @@ export default function App() {
     localStorage.removeItem(K_MOVS)
   }
 
+  function descargarInventario() {
+    const timestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
+
+    const data = items.map(item => ({
+      ID: item.id,
+      SKU: item.sku,
+      Nombre: item.nombre,
+      Categoria: item.categoria,
+      Precio: item.precio,
+      Stock: item.stock,
+      Timestamp: timestamp
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
+
+    XLSX.writeFile(wb, `inventario_joyeria_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    alert("¡Inventario descargado!")
+  }
+
+  // Renderizado
+  if (loadingAuth) {
+    return <div style={{ padding: '100px', textAlign: 'center', fontSize: '1.5em' }}>Verificando sesión...</div>
+  }
+
+  // Pantalla de login/registro si NO hay usuario
+  if (!user) {
+    return (
+      <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
+        <h1 style={{ textAlign: 'center' }}>Inventario de Joyería</h1>
+        <h2 style={{ textAlign: 'center', margin: '30px 0' }}>Inicia sesión o regístrate</h2>
+
+        <form 
+          onSubmit={async (e) => {
+            e.preventDefault()
+            const email = (e.target as any).regEmail.value.trim()
+            const password = (e.target as any).regPassword.value
+            try {
+              await createUserWithEmailAndPassword(auth, email, password)
+              alert("¡Cuenta creada! Ahora inicia sesión.")
+            } catch (err: any) {
+              alert("Error al crear: " + err.message)
+              console.error("Error registro:", err.code, err.message)
+            }
+          }}
+          style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}
+        >
+          <h3>Crear cuenta nueva</h3>
+          <input name="regEmail" type="email" placeholder="Email" required style={{ padding: '12px', borderRadius: '6px' }} />
+          <input name="regPassword" type="password" placeholder="Contraseña (mín 6)" required minLength={6} style={{ padding: '12px', borderRadius: '6px' }} />
+          <button type="submit" className="tab">Registrarme</button>
+        </form>
+
+        <hr style={{ margin: '30px 0', borderColor: '#444' }} />
+
+        <form 
+          onSubmit={async (e) => {
+            e.preventDefault()
+            const email = (e.target as any).loginEmail.value.trim()
+            const password = (e.target as any).loginPassword.value
+            try {
+              await signInWithEmailAndPassword(auth, email, password)
+              alert("¡Sesión iniciada!")
+            } catch (err: any) {
+              alert("Error al iniciar: " + err.message)
+              console.error("Error login:", err.code, err.message)
+            }
+          }}
+          style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}
+        >
+          <h3>Iniciar sesión</h3>
+          <input name="loginEmail" type="email" placeholder="Email" required style={{ padding: '12px', borderRadius: '6px' }} />
+          <input name="loginPassword" type="password" placeholder="Contraseña" required style={{ padding: '12px', borderRadius: '6px' }} />
+          <button type="submit" className="tab">Iniciar sesión</button>
+        </form>
+      </div>
+    )
+  }
+
+  // App completa (logueado)
   return (
     <div className="app">
-      <h1>Inventario de Joyería — PWA (offline)</h1>
+      <h1>Inventario de Joyería — PWA (sincronizado)</h1>
+      <p style={{ textAlign: 'center', color: '#0f0' }}>Bienvenido: {user.email}</p>
+
+      <button 
+        onClick={() => signOut(auth).then(() => alert("Sesión cerrada"))}
+        style={{ margin: '10px auto', display: 'block' }}
+      >
+        Cerrar sesión
+      </button>
 
       <div className="nav">
         {tabs.map((t) => (
-          <button key={t}
-                  className={'tab ' + (tab===t ? 'active':'' )}
-                  onClick={() => setTab(t)}>
+          <button key={t} className={'tab ' + (tab === t ? 'active' : '')} onClick={() => setTab(t)}>
             {ucFirst(t)}
           </button>
         ))}
       </div>
 
-      {/* ===== CATALOGO ===== */}
-      {tab==='catalogo' && (
+      {tab === 'debug' && (
+        <section className="card">
+          <h2>Debug Firebase</h2>
+          <TestFirebase />
+          <p>Usuario: {user.email} (UID: {user.uid})</p>
+        </section>
+      )}
+
+      {tab === 'catalogo' && (
         <section className="card">
           <h2>Catálogo</h2>
-
-          <div style={{display:'grid', gap:12, gridTemplateColumns:'1fr 1fr', alignItems:'end'}}>
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'end' }}>
             <div>
               <label>Buscar</label>
-              <input placeholder="Nombre, SKU o categoría" value={q} onChange={e=>setQ(e.target.value)} />
-              <div className="footer"><small>Datos guardados localmente (offline).</small></div>
+              <input placeholder="Nombre, SKU o categoría" value={q} onChange={e => setQ(e.target.value)} />
+              <div className="footer"><small>Sincronizado con Firebase.</small></div>
             </div>
-            <div style={{textAlign:'right'}}>
+            <div style={{ textAlign: 'right' }}>
               <button className="tab" onClick={resetDraft}>Nuevo producto</button>
             </div>
           </div>
-
           <hr />
-
-          <form onSubmit={saveDraft} style={{display:'grid', gap:12, gridTemplateColumns:'repeat(6, 1fr)'}}>
-            <div style={{gridColumn:'span 2'}}>
+          <form onSubmit={saveDraft} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(6, 1fr)' }}>
+            <div style={{ gridColumn: 'span 2' }}>
               <label>Nombre</label>
-              <input value={draft.nombre} onChange={e=>setDraft({...draft, nombre:e.target.value})} placeholder="Ej: Anillo plata .925" required />
+              <input value={draft.nombre} onChange={e => setDraft({ ...draft, nombre: e.target.value })} placeholder="Ej: Anillo plata .925" required />
             </div>
             <div>
               <label>SKU</label>
-              <input value={draft.sku} onChange={e=>setDraft({...draft, sku:e.target.value})} placeholder="Ej: ARO-PLATA-001" required />
+              <input value={draft.sku} onChange={e => setDraft({ ...draft, sku: e.target.value })} placeholder="Ej: ARO-PLATA-001" required />
             </div>
             <div>
               <label>Categoría</label>
-              <input value={draft.categoria} onChange={e=>setDraft({...draft, categoria:e.target.value})} placeholder="Ej: Anillos" />
+              <input value={draft.categoria} onChange={e => setDraft({ ...draft, categoria: e.target.value })} placeholder="Ej: Anillos" />
             </div>
             <div>
               <label>Precio</label>
-              <input type="number" step="0.01" value={draft.precio} onChange={e=>setDraft({...draft, precio:Number(e.target.value)})} />
+              <input type="number" step="0.01" value={draft.precio} onChange={e => setDraft({ ...draft, precio: Number(e.target.value) })} />
             </div>
             <div>
               <label>Stock</label>
-              <input type="number" value={draft.stock} onChange={e=>setDraft({...draft, stock:Number(e.target.value)})} />
+              <input type="number" value={draft.stock} onChange={e => setDraft({ ...draft, stock: Number(e.target.value) })} />
             </div>
-            <div style={{display:'flex', gap:8, alignItems:'end'}}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
               <button className="tab" type="submit">{draft.id ? 'Guardar cambios' : 'Agregar'}</button>
               {draft.id && <button className="tab" type="button" onClick={resetDraft}>Cancelar</button>}
             </div>
           </form>
-
           <hr />
-
           <table>
             <thead>
               <tr>
@@ -215,61 +349,56 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(p=>(
+              {filtered.map(p => (
                 <tr key={p.id}>
                   <td>{p.nombre}</td>
                   <td>{p.sku}</td>
                   <td>{p.categoria}</td>
                   <td>{currency(p.precio)}</td>
                   <td>{p.stock}</td>
-                  <td style={{display:'flex', gap:8}}>
-                    <button className="tab" onClick={()=>edit(p)}>Editar</button>
-                    <button className="tab" onClick={()=>remove(p.id)}>Borrar</button>
+                  <td style={{ display: 'flex', gap: 8 }}>
+                    <button className="tab" onClick={() => edit(p)}>Editar</button>
+                    <button className="tab" onClick={() => remove(p.id)}>Borrar</button>
                   </td>
                 </tr>
               ))}
-              {filtered.length===0 && <tr><td colSpan={6}>Sin resultados.</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={6}>Sin resultados.</td></tr>}
             </tbody>
           </table>
         </section>
       )}
 
-      {/* ===== MOVIMIENTOS ===== */}
-      {tab==='movimientos' && (
+      {tab === 'movimientos' && (
         <section className="card">
           <h2>Movimientos</h2>
-          {/* Formulario: aplica entrada/salida y ajusta el stock del producto */}
-          <form onSubmit={applyMovimiento} style={{display:'grid', gap:12, gridTemplateColumns:'repeat(6, 1fr)'}}>
-            <div style={{gridColumn:'span 2'}}>
+          <form onSubmit={applyMovimiento} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(6, 1fr)' }}>
+            <div style={{ gridColumn: 'span 2' }}>
               <label>Producto</label>
-              <select value={mvDraft.productoId} onChange={e=>setMvDraft({...mvDraft, productoId:e.target.value})} required>
+              <select value={mvDraft.productoId} onChange={e => setMvDraft({ ...mvDraft, productoId: e.target.value })} required>
                 <option value="">— Selecciona —</option>
-                {items.map(p=> <option key={p.id} value={p.id}>{p.nombre} · {p.sku} (stock {p.stock})</option>)}
+                {items.map(p => <option key={p.id} value={p.id}>{p.nombre} · {p.sku} (stock {p.stock})</option>)}
               </select>
             </div>
             <div>
               <label>Tipo</label>
-              <select value={mvDraft.tipo} onChange={e=>setMvDraft({...mvDraft, tipo:e.target.value as 'entrada'|'salida'})}>
+              <select value={mvDraft.tipo} onChange={e => setMvDraft({ ...mvDraft, tipo: e.target.value as 'entrada' | 'salida' })}>
                 <option value="entrada">Entrada</option>
                 <option value="salida">Salida</option>
               </select>
             </div>
             <div>
               <label>Cantidad</label>
-              <input type="number" min={1} value={mvDraft.cantidad} onChange={e=>setMvDraft({...mvDraft, cantidad:Number(e.target.value)})} required />
+              <input type="number" min={1} value={mvDraft.cantidad} onChange={e => setMvDraft({ ...mvDraft, cantidad: Number(e.target.value) })} required />
             </div>
-            <div style={{gridColumn:'span 2'}}>
+            <div style={{ gridColumn: 'span 2' }}>
               <label>Nota (opcional)</label>
-              <input value={mvDraft.nota||''} onChange={e=>setMvDraft({...mvDraft, nota:e.target.value})} placeholder="Cliente, compra, reparación, etc." />
+              <input value={mvDraft.nota || ''} onChange={e => setMvDraft({ ...mvDraft, nota: e.target.value })} placeholder="Cliente, compra, reparación, etc." />
             </div>
-            <div style={{display:'flex', alignItems:'end'}}>
+            <div style={{ display: 'flex', alignItems: 'end' }}>
               <button className="tab" type="submit">Aplicar</button>
             </div>
           </form>
-
           <hr />
-
-          {/* Historial de movimientos */}
           <table>
             <thead>
               <tr>
@@ -277,8 +406,8 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {movs.map(m=>{
-                const p = items.find(x=>x.id===m.productoId)
+              {movs.map(m => {
+                const p = items.find(x => x.id === m.productoId)
                 return (
                   <tr key={m.id}>
                     <td>{new Date(m.fecha).toLocaleString()}</td>
@@ -289,47 +418,45 @@ export default function App() {
                   </tr>
                 )
               })}
-              {movs.length===0 && <tr><td colSpan={5}>Aún no hay movimientos.</td></tr>}
+              {movs.length === 0 && <tr><td colSpan={5}>Aún no hay movimientos.</td></tr>}
             </tbody>
           </table>
         </section>
       )}
 
-      {/* ===== REPORTES ===== */}
-      {tab==='reportes' && (
+      {tab === 'reportes' && (
         <section className="card">
           <h2>Reportes</h2>
-          <h3 style={{marginTop:0}}>Stock bajo (≤ {LOW})</h3>
+          <h3 style={{ marginTop: 0 }}>Stock bajo (≤ {LOW})</h3>
           <table>
             <thead>
               <tr><th>Producto</th><th>SKU</th><th>Stock</th></tr>
             </thead>
             <tbody>
-              {lowStock.map(p=>(
+              {lowStock.map(p => (
                 <tr key={p.id}>
                   <td>{p.nombre}</td><td>{p.sku}</td><td>{p.stock}</td>
                 </tr>
               ))}
-              {lowStock.length===0 && <tr><td colSpan={3}>Todo en orden.</td></tr>}
+              {lowStock.length === 0 && <tr><td colSpan={3}>Todo en orden.</td></tr>}
             </tbody>
           </table>
+          <button className="tab" onClick={descargarInventario} style={{ marginTop: '20px' }}>
+            Descargar inventario en Excel (con timestamp)
+          </button>
         </section>
       )}
 
-      {/* ===== CONFIG ===== */}
-      {tab==='config' && (
+      {tab === 'config' && (
         <section className="card">
           <h2>Configuración</h2>
-          <ul>
-            <li>Nombre de la tienda, moneda, etc.</li>
-            <li>PWA lista: instalable en compu y celular; funciona offline.</li>
-            <li>Botón de desarrollo:</li>
-          </ul>
           <button className="tab" onClick={resetAll}>Borrar TODO (dev)</button>
         </section>
       )}
 
-      <div className="footer"><small>Offline-first · datos en este dispositivo · listo para sincronizar luego.</small></div>
+      <div className="footer">
+        <small>Sincronizado con Firebase • Usuario: {user.email}</small>
+      </div>
     </div>
   )
 }
