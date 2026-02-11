@@ -29,7 +29,7 @@ type Producto = {
   precio: number
   stock: number
   createdAt?: any
-  lastMovement?: any // Para timestamp del último movimiento
+  lastMovement?: any
 }
 
 type Movimiento = {
@@ -118,7 +118,7 @@ export default function App() {
       p.nombre.toLowerCase().includes(t) ||
       p.sku.toLowerCase().includes(t) ||
       p.categoria.toLowerCase().includes(t) ||
-      p.material.toLowerCase().includes(t) // Agregado búsqueda por material
+      p.material.toLowerCase().includes(t)
     )
   }, [q, items])
 
@@ -238,13 +238,12 @@ export default function App() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
     XLSX.writeFile(wb, nombreArchivo)
-    alert("Inventario descargado")
+    alert("Inventario descargado como: " + nombreArchivo)
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
 
   if (!user) {
-    // Pantalla de login/registro
     return (
       <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
         <h1 style={{ textAlign: 'center' }}>Inventario de Joyería</h1>
@@ -290,10 +289,24 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <img src="/ness-logo.png" alt="Ness Juweiler" style={{ display: 'block', margin: '0 auto', width: '200px' }} /> {/* Imagen de la marca en la app */}
+    <div className="app" style={{ maxWidth: '1800px', margin: '0 auto', padding: '20px' }}>
+      {/* Logo de la marca - grande y centrado */}
+      <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+        <img 
+          src="/ness-logo.png"
+          alt="Ness Juweiler"
+          style={{ 
+            maxWidth: '500px',  // Tamaño más grande
+            height: 'auto',
+            display: 'block',
+            margin: '0 auto',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}
+        />
+      </div>
 
-      <h1>Inventario de Joyería — PWA (sincronizado)</h1>
+      <h1 style={{ textAlign: 'center', marginBottom: '20px' }}>Inventario de Joyería — PWA (sincronizado)</h1>
       <p style={{ textAlign: 'center', color: '#0f0' }}>Bienvenido: {user.email}</p>
 
       <button 
@@ -320,12 +333,12 @@ export default function App() {
       )}
 
       {tab === 'catalogo' && (
-        <section className="card">
+        <section className="card" style={{ maxWidth: '100%', overflowX: 'auto' }}>
           <h2>Catálogo</h2>
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'end' }}>
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'end', marginBottom: '20px' }}>
             <div>
               <label>Buscar</label>
-              <input placeholder="Nombre, SKU o categoría" value={q} onChange={e => setQ(e.target.value)} />
+              <input placeholder="Nombre, SKU, categoría o material" value={q} onChange={e => setQ(e.target.value)} />
               <div className="footer"><small>Sincronizado con Firebase.</small></div>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -333,8 +346,8 @@ export default function App() {
             </div>
           </div>
           <hr />
-          <form onSubmit={saveDraft} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(6, 1fr)' }}>
-            <div style={{ gridColumn: 'span 2' }}>
+          <form onSubmit={saveDraft} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '30px' }}>
+            <div>
               <label>Nombre</label>
               <input value={draft.nombre} onChange={e => setDraft({ ...draft, nombre: e.target.value })} placeholder="Ej: Anillo plata .925" required />
             </div>
@@ -364,10 +377,16 @@ export default function App() {
             </div>
           </form>
           <hr />
-          <table>
+          <table style={{ width: '100%', tableLayout: 'auto' }}>
             <thead>
               <tr>
-                <th>Nombre</th><th>SKU</th><th>Categoría</th><th>Material</th><th>Precio</th><th>Stock</th><th></th>
+                <th>Nombre</th>
+                <th>SKU</th>
+                <th>Categoría</th>
+                <th>Material</th>
+                <th>Precio</th>
+                <th>Stock</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -378,7 +397,7 @@ export default function App() {
                   <td>{p.categoria}</td>
                   <td>{p.material}</td>
                   <td>{currency(p.precio)}</td>
-                  <td>{p.stock}</td>
+                  <td>{p.stock ?? 0}</td>
                   <td style={{ display: 'flex', gap: 8 }}>
                     <button className="tab" onClick={() => edit(p)}>Editar</button>
                     <button className="tab" onClick={() => remove(p.id)}>Borrar</button>
@@ -470,7 +489,7 @@ export default function App() {
               {lowStock.length === 0 && <tr><td colSpan={3}>Todo en orden.</td></tr>}
             </tbody>
           </table>
-          <button className="tab" onClick={descargarInventario} style={{ marginTop: '30px' }}>
+          <button className="tab" onClick={descargarInventario} style={{ marginTop: '20px' }}>
             Descargar inventario en Excel
           </button>
         </section>
