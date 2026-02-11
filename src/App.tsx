@@ -9,8 +9,7 @@ import {
   deleteDoc,
   serverTimestamp,
   onSnapshot,
-  addDoc,
-  Timestamp
+  addDoc
 } from 'firebase/firestore'
 import {
   createUserWithEmailAndPassword,
@@ -26,10 +25,11 @@ type Producto = {
   sku: string
   nombre: string
   categoria: string
+  material: string
   precio: number
   stock: number
-  createdAt?: Timestamp
-  updatedAt?: Timestamp
+  createdAt?: any
+  lastMovement?: any // Para timestamp del último movimiento
 }
 
 type Movimiento = {
@@ -37,16 +37,16 @@ type Movimiento = {
   productoId: string
   tipo: 'entrada' | 'salida'
   cantidad: number
-  fecha: Timestamp
+  fecha: any
   nota?: string
 }
 
 type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
 
 const seed: Producto[] = [
-  { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', precio: 850, stock: 12 },
-  { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', precio: 5200, stock: 3 },
-  { id: 'p-003', sku: 'ARE-ACERO-003', nombre: 'Aretes acero', categoria: 'Aretes', precio: 250, stock: 22 },
+  { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', material: 'Plata', precio: 850, stock: 12 },
+  { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', material: 'Oro', precio: 5200, stock: 3 },
+  { id: 'p-003', sku: 'ARE-ACERO-003', nombre: 'Aretes acero', categoria: 'Aretes', material: 'Acero', precio: 250, stock: 22 },
 ]
 
 const ucFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -58,30 +58,36 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('catalogo')
   const [q, setQ] = useState('')
   const [items, setItems] = useState<Producto[]>(seed)
-  const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
+  const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', material: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
-    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: Timestamp.now(), nota: ''
+    id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: serverTimestamp(), nota: ''
   })
   const [movs, setMovs] = useState<Movimiento[]>([])
 
-  // Auth listener
+  const LOW = 5
+  const lowStock = useMemo(() => items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock), [items])
+
+  const currency = (n: number | undefined | null) => {
+    if (n == null || isNaN(n)) return '$0.00'
+    return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u)
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser)
       setLoadingAuth(false)
     })
     return () => unsubscribe()
   }, [])
 
-  // Productos en tiempo real
   useEffect(() => {
     if (!user) return
 
-    const qProducts = query(collection(db, 'items'))
-    const unsubscribe = onSnapshot(qProducts, (snap) => {
-      const loaded = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data()
+    const qRef = query(collection(db, 'items'))
+    const unsubscribe = onSnapshot(qRef, (snapshot) => {
+      const loaded = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
       } as Producto))
       setItems(loaded.length > 0 ? loaded : seed)
     })
@@ -89,16 +95,15 @@ export default function App() {
     return () => unsubscribe()
   }, [user])
 
-  // Movimientos en tiempo real
   useEffect(() => {
     if (!user) return
 
-    const qMovs = query(collection(db, 'movimientos'))
-    const unsubscribe = onSnapshot(qMovs, (snap) => {
-      const loaded = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-        fecha: d.data().fecha?.toDate ? d.data().fecha.toDate() : new Date(d.data().fecha)
+    const qRef = query(collection(db, 'movimientos'))
+    const unsubscribe = onSnapshot(qRef, (snapshot) => {
+      const loaded = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        fecha: doc.data().fecha.toDate()
       } as Movimiento))
       setMovs(loaded)
     })
@@ -107,25 +112,15 @@ export default function App() {
   }, [user])
 
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase()
-    if (!term) return items
+    const t = q.trim().toLowerCase()
+    if (!t) return items
     return items.filter(p =>
-      p.nombre.toLowerCase().includes(term) ||
-      p.sku.toLowerCase().includes(term) ||
-      p.categoria.toLowerCase().includes(term)
+      p.nombre.toLowerCase().includes(t) ||
+      p.sku.toLowerCase().includes(t) ||
+      p.categoria.toLowerCase().includes(t) ||
+      p.material.toLowerCase().includes(t) // Agregado búsqueda por material
     )
   }, [q, items])
-
-  const LOW = 5
-  const lowStock = useMemo(() => 
-    items.filter(p => p.stock <= LOW).sort((a, b) => a.stock - b.stock),
-    [items]
-  )
-
-  const currency = (n: number | undefined | null) => {
-    if (n == null || isNaN(n)) return '$0.00'
-    return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
 
   async function saveDraft(e: React.FormEvent) {
     e.preventDefault()
@@ -135,11 +130,11 @@ export default function App() {
     }
 
     const id = draft.id || `p-${Date.now()}`
-
     const data = {
       sku: draft.sku,
       nombre: draft.nombre,
       categoria: draft.categoria || '',
+      material: draft.material || '',
       precio: draft.precio || 0,
       stock: draft.stock || 0,
       updatedAt: serverTimestamp(),
@@ -165,7 +160,7 @@ export default function App() {
   }
 
   function resetDraft() {
-    setDraft({ id: '', sku: '', nombre: '', categoria: '', precio: 0, stock: 0 })
+    setDraft({ id: '', sku: '', nombre: '', categoria: '', material: '', precio: 0, stock: 0 })
   }
 
   function edit(p: Producto) {
@@ -188,7 +183,7 @@ export default function App() {
     }
 
     try {
-      await setDoc(doc(db, 'items', prod.id), { stock: nuevoStock }, { merge: true })
+      await setDoc(doc(db, 'items', prod.id), { stock: nuevoStock, lastMovement: serverTimestamp() }, { merge: true })
       await addDoc(collection(db, 'movimientos'), {
         productoId: mvDraft.productoId,
         tipo: mvDraft.tipo,
@@ -197,56 +192,10 @@ export default function App() {
         nota: mvDraft.nota || ''
       })
       alert("Movimiento registrado")
-      setMvDraft({ id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: new Date(), nota: '' })
+      setMvDraft({ id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: serverTimestamp(), nota: '' })
     } catch (err: any) {
       alert("Error en movimiento: " + err.message)
     }
-  }
-
-  function descargarInventario() {
-    const data = items.map(item => {
-      let fechaCreacion = 'Sin fecha'
-
-      if (item.createdAt && item.createdAt.toDate) {
-        const date = item.createdAt.toDate()
-        fechaCreacion = date.toLocaleString('es-MX', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        })
-      }
-
-      return {
-        ID: item.id,
-        SKU: item.sku,
-        Nombre: item.nombre,
-        Categoria: item.categoria,
-        Precio: item.precio,
-        Stock: item.stock,
-        'Fecha de creación': fechaCreacion
-      }
-    })
-
-    // Nombre con fecha y hora
-    const now = new Date()
-    const fechaHora = now.toLocaleString('es-MX', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).replace(/[\/: ]/g, '-')
-
-    const nombreArchivo = `inventario_${fechaHora}.xlsx`
-
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
-    XLSX.writeFile(wb, nombreArchivo)
-    alert(`Inventario descargado como:\n${nombreArchivo}`)
   }
 
   function resetAll() {
@@ -255,9 +204,47 @@ export default function App() {
     setMovs([])
   }
 
+  function descargarInventario() {
+    const data = items.map(item => {
+      let fechaCreacion = 'Sin fecha'
+      if (item.createdAt) {
+        const date = item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)
+        fechaCreacion = date.toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      }
+
+      let ultimoMovimiento = 'Sin movimientos'
+      if (item.lastMovement) {
+        const date = item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)
+        ultimoMovimiento = date.toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      }
+
+      return {
+        SKU: item.sku,
+        Nombre: item.nombre,
+        Categoria: item.categoria,
+        Material: item.material,
+        Precio: item.precio,
+        Stock: item.stock,
+        'Fecha Creación': fechaCreacion,
+        'Último Movimiento': ultimoMovimiento
+      }
+    })
+
+    const now = new Date()
+    const fechaHora = now.toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/[/,: ]/g, '-')
+    const nombreArchivo = `inventario_${fechaHora}.xlsx`
+
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
+    XLSX.writeFile(wb, nombreArchivo)
+    alert("Inventario descargado")
+  }
+
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
 
   if (!user) {
+    // Pantalla de login/registro
     return (
       <div style={{ maxWidth: '500px', margin: '60px auto', padding: '40px', background: '#111', borderRadius: '12px', color: '#fff' }}>
         <h1 style={{ textAlign: 'center' }}>Inventario de Joyería</h1>
@@ -304,6 +291,8 @@ export default function App() {
 
   return (
     <div className="app">
+      <img src="/ness-logo.png" alt="Ness Juweiler" style={{ display: 'block', margin: '0 auto', width: '200px' }} /> {/* Imagen de la marca en la app */}
+
       <h1>Inventario de Joyería — PWA (sincronizado)</h1>
       <p style={{ textAlign: 'center', color: '#0f0' }}>Bienvenido: {user.email}</p>
 
@@ -358,6 +347,10 @@ export default function App() {
               <input value={draft.categoria} onChange={e => setDraft({ ...draft, categoria: e.target.value })} placeholder="Ej: Anillos" />
             </div>
             <div>
+              <label>Material</label>
+              <input value={draft.material} onChange={e => setDraft({ ...draft, material: e.target.value })} placeholder="Ej: Plata" />
+            </div>
+            <div>
               <label>Precio</label>
               <input type="number" step="0.01" value={draft.precio} onChange={e => setDraft({ ...draft, precio: Number(e.target.value) })} />
             </div>
@@ -374,7 +367,7 @@ export default function App() {
           <table>
             <thead>
               <tr>
-                <th>Nombre</th><th>SKU</th><th>Categoría</th><th>Precio</th><th>Stock</th><th></th>
+                <th>Nombre</th><th>SKU</th><th>Categoría</th><th>Material</th><th>Precio</th><th>Stock</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -383,15 +376,16 @@ export default function App() {
                   <td>{p.nombre}</td>
                   <td>{p.sku}</td>
                   <td>{p.categoria}</td>
+                  <td>{p.material}</td>
                   <td>{currency(p.precio)}</td>
-                  <td>{p.stock ?? 0}</td>
+                  <td>{p.stock}</td>
                   <td style={{ display: 'flex', gap: 8 }}>
                     <button className="tab" onClick={() => edit(p)}>Editar</button>
                     <button className="tab" onClick={() => remove(p.id)}>Borrar</button>
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={6}>Sin resultados.</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={7}>Sin resultados.</td></tr>}
             </tbody>
           </table>
         </section>
@@ -428,34 +422,30 @@ export default function App() {
               <input value={mvDraft.nota || ''} onChange={e => setMvDraft({ ...mvDraft, nota: e.target.value })} placeholder="Cliente, reparación, etc." />
             </div>
             <div style={{ display: 'flex', alignItems: 'end' }}>
-              <button className="tab" type="submit">Aplicar movimiento</button>
+              <button className="tab" type="submit">Aplicar</button>
             </div>
           </form>
           <hr />
           <table>
             <thead>
               <tr>
-                <th>Fecha</th>
-                <th>Producto</th>
-                <th>Tipo</th>
-                <th>Cantidad</th>
-                <th>Nota</th>
+                <th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Nota</th>
               </tr>
             </thead>
             <tbody>
               {movs.map(m => {
-                const prod = items.find(p => p.id === m.productoId)
+                const p = items.find(x => x.id === m.productoId)
                 return (
                   <tr key={m.id}>
                     <td>{m.fecha.toLocaleString()}</td>
-                    <td>{prod ? `${prod.nombre} (${prod.sku})` : 'Producto eliminado'}</td>
+                    <td>{p ? `${p.nombre} (${p.sku})` : m.productoId}</td>
                     <td>{m.tipo}</td>
                     <td>{m.cantidad}</td>
                     <td>{m.nota || '—'}</td>
                   </tr>
                 )
               })}
-              {movs.length === 0 && <tr><td colSpan={5}>No hay movimientos registrados.</td></tr>}
+              {movs.length === 0 && <tr><td colSpan={5}>Aún no hay movimientos.</td></tr>}
             </tbody>
           </table>
         </section>
@@ -468,28 +458,19 @@ export default function App() {
           <table>
             <thead>
               <tr>
-                <th>Producto</th>
-                <th>SKU</th>
-                <th>Stock</th>
+                <th>Producto</th><th>SKU</th><th>Stock</th>
               </tr>
             </thead>
             <tbody>
               {lowStock.map(p => (
                 <tr key={p.id}>
-                  <td>{p.nombre}</td>
-                  <td>{p.sku}</td>
-                  <td>{p.stock}</td>
+                  <td>{p.nombre}</td><td>{p.sku}</td><td>{p.stock}</td>
                 </tr>
               ))}
-              {lowStock.length === 0 && <tr><td colSpan={3}>No hay productos con stock bajo.</td></tr>}
+              {lowStock.length === 0 && <tr><td colSpan={3}>Todo en orden.</td></tr>}
             </tbody>
           </table>
-
-          <button 
-            className="tab" 
-            onClick={descargarInventario} 
-            style={{ marginTop: '20px', padding: '10px 20px' }}
-          >
+          <button className="tab" onClick={descargarInventario} style={{ marginTop: '30px' }}>
             Descargar inventario en Excel
           </button>
         </section>
@@ -498,7 +479,7 @@ export default function App() {
       {tab === 'config' && (
         <section className="card">
           <h2>Configuración</h2>
-          <button className="tab" onClick={resetAll}>Borrar TODO (solo desarrollo)</button>
+          <button className="tab" onClick={resetAll}>Borrar TODO (dev)</button>
         </section>
       )}
 
