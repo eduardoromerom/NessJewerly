@@ -9,7 +9,8 @@ import {
   deleteDoc,
   serverTimestamp,
   onSnapshot,
-  addDoc
+  addDoc,
+  getDocs
 } from 'firebase/firestore'
 import {
   createUserWithEmailAndPassword,
@@ -26,6 +27,7 @@ type Producto = {
   nombre: string
   categoria: string
   material: string
+  ubicacion: string
   precio: number
   stock: number
   createdAt?: any
@@ -44,9 +46,9 @@ type Movimiento = {
 type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
 
 const seed: Producto[] = [
-  { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', material: 'Plata', precio: 850, stock: 12 },
-  { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', material: 'Oro', precio: 5200, stock: 3 },
-  { id: 'p-003', sku: 'ARE-ACERO-003', nombre: 'Aretes acero', categoria: 'Aretes', material: 'Acero', precio: 250, stock: 22 },
+  { id: 'p-001', sku: 'ARO-PLATA-001', nombre: 'Anillo plata .925', categoria: 'Anillos', material: 'Plata', ubicacion: 'Tienda 1', precio: 850, stock: 12 },
+  { id: 'p-002', sku: 'CAD-ORO-002', nombre: 'Cadena oro 14k', categoria: 'Cadenas', material: 'Oro', ubicacion: 'Tienda 2', precio: 5200, stock: 3 },
+  { id: 'p-003', sku: 'ARE-ACERO-003', nombre: 'Aretes acero', categoria: 'Aretes', material: 'Acero', ubicacion: 'Tienda 1', precio: 250, stock: 22 },
 ]
 
 const ucFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -57,8 +59,9 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [tab, setTab] = useState<Tab>('catalogo')
   const [q, setQ] = useState('')
+  const [filtroUbicacion, setFiltroUbicacion] = useState<string>('')
   const [items, setItems] = useState<Producto[]>(seed)
-  const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', material: '', precio: 0, stock: 0 })
+  const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', material: '', ubicacion: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
     id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: serverTimestamp(), nota: ''
   })
@@ -71,6 +74,11 @@ export default function App() {
     if (n == null || isNaN(n)) return '$0.00'
     return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
+
+  const ubicacionesUnicas = useMemo(() => {
+    const ubicaciones = new Set(items.map(p => p.ubicacion).filter(u => u))
+    return Array.from(ubicaciones)
+  }, [items])
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -112,20 +120,37 @@ export default function App() {
   }, [user])
 
   const filtered = useMemo(() => {
+    let filteredItems = items
+
+    if (filtroUbicacion) {
+      filteredItems = filteredItems.filter(p => p.ubicacion === filtroUbicacion)
+    }
+
     const t = q.trim().toLowerCase()
-    if (!t) return items
-    return items.filter(p =>
+    if (!t) return filteredItems
+
+    return filteredItems.filter(p =>
       p.nombre.toLowerCase().includes(t) ||
       p.sku.toLowerCase().includes(t) ||
       p.categoria.toLowerCase().includes(t) ||
-      p.material.toLowerCase().includes(t)
+      p.material.toLowerCase().includes(t) ||
+      p.ubicacion.toLowerCase().includes(t)
     )
-  }, [q, items])
+  }, [q, items, filtroUbicacion])
 
   async function saveDraft(e: React.FormEvent) {
     e.preventDefault()
     if (!draft.nombre || !draft.sku) {
       alert("Nombre y SKU son obligatorios")
+      return
+    }
+
+    // Verificar si el SKU ya existe (ignorando mayúsculas/minúsculas y si es edición del mismo producto)
+    const skuExistente = items.some(p => 
+      p.sku.toLowerCase() === draft.sku.toLowerCase() && p.id !== draft.id
+    )
+    if (skuExistente) {
+      alert("¡Este SKU ya está registrado! Usa uno diferente.")
       return
     }
 
@@ -135,6 +160,7 @@ export default function App() {
       nombre: draft.nombre,
       categoria: draft.categoria || '',
       material: draft.material || '',
+      ubicacion: draft.ubicacion || '',
       precio: draft.precio || 0,
       stock: draft.stock || 0,
       updatedAt: serverTimestamp(),
@@ -143,7 +169,7 @@ export default function App() {
 
     try {
       await setDoc(doc(db, 'items', id), data, { merge: true })
-      alert("Producto guardado")
+      alert("Producto guardado exitosamente")
       resetDraft()
     } catch (err: any) {
       alert("Error al guardar: " + err.message)
@@ -151,7 +177,7 @@ export default function App() {
   }
 
   async function remove(id: string) {
-    if (!confirm('¿Eliminar?')) return
+    if (!confirm('¿Eliminar producto?')) return
     try {
       await deleteDoc(doc(db, 'items', id))
     } catch (err: any) {
@@ -160,7 +186,7 @@ export default function App() {
   }
 
   function resetDraft() {
-    setDraft({ id: '', sku: '', nombre: '', categoria: '', material: '', precio: 0, stock: 0 })
+    setDraft({ id: '', sku: '', nombre: '', categoria: '', material: '', ubicacion: '', precio: 0, stock: 0 })
   }
 
   function edit(p: Producto) {
@@ -205,40 +231,80 @@ export default function App() {
   }
 
   function descargarInventario() {
-    const data = items.map(item => {
-      let fechaCreacion = 'Sin fecha'
-      if (item.createdAt) {
-        const date = item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)
-        fechaCreacion = date.toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      }
+    const opciones = ["1 - Total (todos los productos)"];
+    ubicacionesUnicas.forEach((ubicacion, index) => {
+      opciones.push(`${index + 2} - ${ubicacion}`);
+    });
 
-      let ultimoMovimiento = 'Sin movimientos'
-      if (item.lastMovement) {
-        const date = item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)
-        ultimoMovimiento = date.toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      }
+    const mensaje = "Elige el tipo de reporte:\n\n" + opciones.join("\n") + "\n\nEscribe el número (ej. 1, 2, 3...):";
 
-      return {
+    const eleccion = prompt(mensaje);
+
+    if (!eleccion) return;
+
+    const num = parseInt(eleccion.trim());
+
+    if (isNaN(num) || num < 1 || num > opciones.length) {
+      alert("Opción inválida. Elige un número de la lista.");
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    if (num === 1) {
+      // Total
+      const data = items.map(item => ({
         SKU: item.sku,
+        Categoría: item.categoria,
         Nombre: item.nombre,
-        Categoria: item.categoria,
-        Material: item.material,
         Precio: item.precio,
         Stock: item.stock,
-        'Fecha Creación': fechaCreacion,
-        'Último Movimiento': ultimoMovimiento
+        Material: item.material,
+        Ubicación: item.ubicacion,
+        'Fecha Creación': item.createdAt 
+          ? (item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+          : 'Sin fecha',
+        'Último Movimiento': item.lastMovement 
+          ? (item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+          : 'Sin movimientos'
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, 'Total');
+    } else {
+      // Por ubicación específica
+      const indexUbicacion = num - 2;
+      const ubicacionSeleccionada = ubicacionesUnicas[indexUbicacion];
+
+      if (!ubicacionSeleccionada) {
+        alert("Ubicación no encontrada.");
+        return;
       }
-    })
 
-    const now = new Date()
-    const fechaHora = now.toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/[/,: ]/g, '-')
-    const nombreArchivo = `inventario_${fechaHora}.xlsx`
+      const data = items.filter(item => item.ubicacion === ubicacionSeleccionada).map(item => ({
+        SKU: item.sku,
+        Categoría: item.categoria,
+        Nombre: item.nombre,
+        Precio: item.precio,
+        Stock: item.stock,
+        Material: item.material,
+        'Fecha Creación': item.createdAt 
+          ? (item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+          : 'Sin fecha',
+        'Último Movimiento': item.lastMovement 
+          ? (item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+          : 'Sin movimientos'
+      }));
 
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
-    XLSX.writeFile(wb, nombreArchivo)
-    alert("Inventario descargado como: " + nombreArchivo)
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, ubicacionSeleccionada);
+    }
+
+    const fecha = new Date().toISOString().slice(0, 10);
+    const nombreArchivo = `inventario_${fecha}.xlsx`;
+
+    XLSX.writeFile(wb, nombreArchivo);
+    alert(`Reporte descargado como:\n${nombreArchivo}`);
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
@@ -290,13 +356,12 @@ export default function App() {
 
   return (
     <div className="app" style={{ maxWidth: '1800px', margin: '0 auto', padding: '20px' }}>
-      {/* Logo de la marca - grande y centrado */}
       <div style={{ textAlign: 'center', marginBottom: '40px' }}>
         <img 
           src="/ness-logo.png"
           alt="Ness Juweiler"
           style={{ 
-            maxWidth: '500px',  // Tamaño más grande
+            maxWidth: '500px',
             height: 'auto',
             display: 'block',
             margin: '0 auto',
@@ -335,18 +400,27 @@ export default function App() {
       {tab === 'catalogo' && (
         <section className="card" style={{ maxWidth: '100%', overflowX: 'auto' }}>
           <h2>Catálogo</h2>
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'end', marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'end', marginBottom: '20px' }}>
             <div>
               <label>Buscar</label>
-              <input placeholder="Nombre, SKU, categoría o material" value={q} onChange={e => setQ(e.target.value)} />
+              <input placeholder="Nombre, SKU, categoría, material o ubicación" value={q} onChange={e => setQ(e.target.value)} />
               <div className="footer"><small>Sincronizado con Firebase.</small></div>
+            </div>
+            <div>
+              <label>Filtro por Ubicación</label>
+              <select value={filtroUbicacion} onChange={e => setFiltroUbicacion(e.target.value)}>
+                <option value="">Todas las tiendas</option>
+                {ubicacionesUnicas.map(u => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
             </div>
             <div style={{ textAlign: 'right' }}>
               <button className="tab" onClick={resetDraft}>Nuevo producto</button>
             </div>
           </div>
           <hr />
-          <form onSubmit={saveDraft} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '30px' }}>
+          <form onSubmit={saveDraft} style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(8, 1fr)', marginBottom: '30px' }}>
             <div>
               <label>Nombre</label>
               <input value={draft.nombre} onChange={e => setDraft({ ...draft, nombre: e.target.value })} placeholder="Ej: Anillo plata .925" required />
@@ -362,6 +436,10 @@ export default function App() {
             <div>
               <label>Material</label>
               <input value={draft.material} onChange={e => setDraft({ ...draft, material: e.target.value })} placeholder="Ej: Plata" />
+            </div>
+            <div>
+              <label>Ubicación</label>
+              <input value={draft.ubicacion} onChange={e => setDraft({ ...draft, ubicacion: e.target.value })} placeholder="Ej: Tienda Centro" />
             </div>
             <div>
               <label>Precio</label>
@@ -380,13 +458,7 @@ export default function App() {
           <table style={{ width: '100%', tableLayout: 'auto' }}>
             <thead>
               <tr>
-                <th>Nombre</th>
-                <th>SKU</th>
-                <th>Categoría</th>
-                <th>Material</th>
-                <th>Precio</th>
-                <th>Stock</th>
-                <th></th>
+                <th>Nombre</th><th>SKU</th><th>Categoría</th><th>Material</th><th>Ubicación</th><th>Precio</th><th>Stock</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -396,6 +468,7 @@ export default function App() {
                   <td>{p.sku}</td>
                   <td>{p.categoria}</td>
                   <td>{p.material}</td>
+                  <td>{p.ubicacion}</td>
                   <td>{currency(p.precio)}</td>
                   <td>{p.stock ?? 0}</td>
                   <td style={{ display: 'flex', gap: 8 }}>
@@ -404,7 +477,7 @@ export default function App() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={7}>Sin resultados.</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={8}>Sin resultados.</td></tr>}
             </tbody>
           </table>
         </section>
