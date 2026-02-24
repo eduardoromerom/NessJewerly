@@ -65,7 +65,7 @@ export default function App() {
   const [q, setQ] = useState('')
   const [filtroUbicacion, setFiltroUbicacion] = useState<string>('')
   const [items, setItems] = useState<Producto[]>(seed)
-  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]) // Lista de ubicaciones guardadas
+  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]) // Lista de ubicaciones
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', material: '', ubicacion: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
     id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: serverTimestamp(), nota: ''
@@ -96,6 +96,8 @@ export default function App() {
     return () => unsubscribe()
   }, [user])
 
+  const ubicacionesUnicas = useMemo(() => ubicaciones.map(u => u.nombre).sort(), [ubicaciones])
+
   // Agregar nueva ubicación
   async function agregarUbicacion() {
     const nombre = prompt("Escribe el nombre de la nueva ubicación (ej. Tienda Centro):")
@@ -106,11 +108,28 @@ export default function App() {
       await setDoc(doc(db, 'ubicaciones', id), { nombre: nombre.trim() })
       alert("Ubicación agregada")
     } catch (err: any) {
-      alert("Error al agregar ubicación: " + err.message)
+      alert("Error al agregar: " + err.message)
     }
   }
 
-  const ubicacionesUnicas = useMemo(() => ubicaciones.map(u => u.nombre), [ubicaciones])
+  // Borrar ubicación
+  async function borrarUbicacion(id: string, nombre: string) {
+    if (!confirm(`¿Borrar ubicación "${nombre}"?`)) return
+
+    // Verificar si hay productos usando esta ubicación
+    const productosEnUbicacion = items.some(p => p.ubicacion === nombre)
+    if (productosEnUbicacion) {
+      alert("No se puede borrar: hay productos en esta ubicación.")
+      return
+    }
+
+    try {
+      await deleteDoc(doc(db, 'ubicaciones', id))
+      alert("Ubicación borrada")
+    } catch (err: any) {
+      alert("Error al borrar: " + err.message)
+    }
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -181,12 +200,6 @@ export default function App() {
     const skuExistente = items.some(p => p.sku.toLowerCase() === draft.sku.toLowerCase() && p.id !== draft.id)
     if (skuExistente) {
       alert("Este SKU ya existe. Usa uno diferente.")
-      return
-    }
-
-    // Verificar que se haya seleccionado una ubicación
-    if (!draft.ubicacion) {
-      alert("Selecciona una ubicación")
       return
     }
 
@@ -285,62 +298,42 @@ export default function App() {
       return;
     }
 
-    const wb = XLSX.utils.book_new();
+    let filteredItems = items;
+    let sheetName = 'Total';
+    let nombreArchivo = `inventario_total_${new Date().toISOString().slice(0,10)}.xlsx`;
 
-    if (num === 1) {
-      // Total
-      const data = items.map(item => ({
-        SKU: item.sku,
-        Categoría: item.categoria,
-        Nombre: item.nombre,
-        Precio: item.precio,
-        Stock: item.stock,
-        Material: item.material,
-        Ubicación: item.ubicacion,
-        'Fecha Creación': item.createdAt 
-          ? (item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-          : 'Sin fecha',
-        'Último Movimiento': item.lastMovement 
-          ? (item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-          : 'Sin movimientos'
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(data);
-      XLSX.utils.book_append_sheet(wb, ws, 'Total');
-    } else {
-      // Por ubicación específica
+    if (num > 1) {
       const indexUbicacion = num - 2;
       const ubicacionSeleccionada = ubicacionesUnicas[indexUbicacion];
-
-      if (!ubicacionSeleccionada) {
-        alert("Ubicación no encontrada.");
-        return;
-      }
-
-      const data = items.filter(item => item.ubicacion === ubicacionSeleccionada).map(item => ({
-        SKU: item.sku,
-        Categoría: item.categoria,
-        Nombre: item.nombre,
-        Precio: item.precio,
-        Stock: item.stock,
-        Material: item.material,
-        'Fecha Creación': item.createdAt 
-          ? (item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-          : 'Sin fecha',
-        'Último Movimiento': item.lastMovement 
-          ? (item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-          : 'Sin movimientos'
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(data);
-      XLSX.utils.book_append_sheet(wb, ws, ubicacionSeleccionada);
+      filteredItems = items.filter(item => item.ubicacion === ubicacionSeleccionada);
+      sheetName = ubicacionSeleccionada;
+      nombreArchivo = `inventario_${ubicacionSeleccionada.replace(/ /g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
     }
 
-    const fecha = new Date().toISOString().slice(0, 10);
-    const nombreArchivo = `inventario_${fecha}.xlsx`;
+    // Ordenar por categoría alfabética
+    filteredItems.sort((a, b) => a.categoria.localeCompare(b.categoria));
 
-    XLSX.writeFile(wb, nombreArchivo);
-    alert(`Reporte descargado como:\n${nombreArchivo}`);
+    const data = filteredItems.map(item => ({
+      SKU: item.sku,
+      Categoría: item.categoria,
+      Nombre: item.nombre,
+      Precio: item.precio,
+      Stock: item.stock,
+      Material: item.material,
+      ...(num === 1 ? { Ubicación: item.ubicacion } : {}),
+      'Fecha Creación': item.createdAt 
+        ? (item.createdAt.toDate ? item.createdAt.toDate() : new Date(item.createdAt)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : 'Sin fecha',
+      'Último Movimiento': item.lastMovement 
+        ? (item.lastMovement.toDate ? item.lastMovement.toDate() : new Date(item.lastMovement)).toLocaleString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : 'Sin movimientos'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, sheetName)
+    XLSX.writeFile(wb, nombreArchivo)
+    alert(`Reporte descargado como:\n${nombreArchivo}`)
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
@@ -442,19 +435,14 @@ export default function App() {
               <input placeholder="Nombre, SKU, categoría, material o ubicación" value={q} onChange={e => setQ(e.target.value)} />
               <div className="footer"><small>Sincronizado con Firebase.</small></div>
             </div>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <label>Filtro por Ubicación</label>
-                <select value={filtroUbicacion} onChange={e => setFiltroUbicacion(e.target.value)}>
-                  <option value="">Todas las tiendas</option>
-                  {ubicacionesUnicas.map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-              </div>
-              <button className="tab" onClick={agregarUbicacion} style={{ marginTop: '25px' }}>
-                Agregar Ubicación
-              </button>
+            <div>
+              <label>Filtro por Ubicación</label>
+              <select value={filtroUbicacion} onChange={e => setFiltroUbicacion(e.target.value)}>
+                <option value="">Todas las tiendas</option>
+                {ubicacionesUnicas.map(u => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
             </div>
             <div style={{ textAlign: 'right' }}>
               <button className="tab" onClick={resetDraft}>Nuevo producto</button>
@@ -618,6 +606,26 @@ export default function App() {
         <section className="card">
           <h2>Configuración</h2>
           <button className="tab" onClick={resetAll}>Borrar TODO (dev)</button>
+          <hr />
+          <h3>Ubicaciones</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Ubicación</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {ubicaciones.map(u => (
+                <tr key={u.id}>
+                  <td>{u.nombre}</td>
+                  <td>
+                    <button className="tab" onClick={() => borrarUbicacion(u.id, u.nombre)}>Borrar</button>
+                  </td>
+                </tr>
+              ))}
+              {ubicaciones.length === 0 && <tr><td colSpan={2}>No hay ubicaciones.</td></tr>}
+            </tbody>
+          </table>
         </section>
       )}
 
