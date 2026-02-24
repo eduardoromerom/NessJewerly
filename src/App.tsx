@@ -42,6 +42,11 @@ type Movimiento = {
   nota?: string
 }
 
+type Ubicacion = {
+  id: string
+  nombre: string
+}
+
 type Tab = 'catalogo' | 'movimientos' | 'reportes' | 'config' | 'debug'
 
 const seed: Producto[] = [
@@ -60,6 +65,7 @@ export default function App() {
   const [q, setQ] = useState('')
   const [filtroUbicacion, setFiltroUbicacion] = useState<string>('')
   const [items, setItems] = useState<Producto[]>(seed)
+  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]) // Lista de ubicaciones guardadas
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', material: '', ubicacion: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
     id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: serverTimestamp(), nota: ''
@@ -74,10 +80,37 @@ export default function App() {
     return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  const ubicacionesUnicas = useMemo(() => {
-    const ubicaciones = new Set(items.map(p => p.ubicacion).filter(u => u))
-    return Array.from(ubicaciones)
-  }, [items])
+  // Cargar ubicaciones desde Firestore
+  useEffect(() => {
+    if (!user) return
+
+    const qUbi = query(collection(db, 'ubicaciones'))
+    const unsubscribe = onSnapshot(qUbi, (snapshot) => {
+      const loaded = snapshot.docs.map(doc => ({
+        id: doc.id,
+        nombre: doc.data().nombre
+      } as Ubicacion))
+      setUbicaciones(loaded)
+    })
+
+    return () => unsubscribe()
+  }, [user])
+
+  // Agregar nueva ubicación
+  async function agregarUbicacion() {
+    const nombre = prompt("Escribe el nombre de la nueva ubicación (ej. Tienda Centro):")
+    if (!nombre || nombre.trim() === '') return
+
+    const id = `ubi-${Date.now()}`
+    try {
+      await setDoc(doc(db, 'ubicaciones', id), { nombre: nombre.trim() })
+      alert("Ubicación agregada")
+    } catch (err: any) {
+      alert("Error al agregar ubicación: " + err.message)
+    }
+  }
+
+  const ubicacionesUnicas = useMemo(() => ubicaciones.map(u => u.nombre), [ubicaciones])
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -144,10 +177,16 @@ export default function App() {
       return
     }
 
-    // Verificar si SKU ya existe
+    // Verificar SKU duplicado
     const skuExistente = items.some(p => p.sku.toLowerCase() === draft.sku.toLowerCase() && p.id !== draft.id)
     if (skuExistente) {
       alert("Este SKU ya existe. Usa uno diferente.")
+      return
+    }
+
+    // Verificar que se haya seleccionado una ubicación
+    if (!draft.ubicacion) {
+      alert("Selecciona una ubicación")
       return
     }
 
@@ -157,7 +196,7 @@ export default function App() {
       nombre: draft.nombre,
       categoria: draft.categoria || '',
       material: draft.material || '',
-      ubicacion: draft.ubicacion || '',
+      ubicacion: draft.ubicacion,
       precio: draft.precio || 0,
       stock: draft.stock || 0,
       updatedAt: serverTimestamp(),
@@ -403,14 +442,19 @@ export default function App() {
               <input placeholder="Nombre, SKU, categoría, material o ubicación" value={q} onChange={e => setQ(e.target.value)} />
               <div className="footer"><small>Sincronizado con Firebase.</small></div>
             </div>
-            <div>
-              <label>Filtro por Ubicación</label>
-              <select value={filtroUbicacion} onChange={e => setFiltroUbicacion(e.target.value)}>
-                <option value="">Todas las tiendas</option>
-                {ubicacionesUnicas.map(u => (
-                  <option key={u} value={u}>{u}</option>
-                ))}
-              </select>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <label>Filtro por Ubicación</label>
+                <select value={filtroUbicacion} onChange={e => setFiltroUbicacion(e.target.value)}>
+                  <option value="">Todas las tiendas</option>
+                  {ubicacionesUnicas.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+              <button className="tab" onClick={agregarUbicacion} style={{ marginTop: '25px' }}>
+                Agregar Ubicación
+              </button>
             </div>
             <div style={{ textAlign: 'right' }}>
               <button className="tab" onClick={resetDraft}>Nuevo producto</button>
@@ -436,7 +480,12 @@ export default function App() {
             </div>
             <div>
               <label>Ubicación</label>
-              <input value={draft.ubicacion} onChange={e => setDraft({ ...draft, ubicacion: e.target.value })} placeholder="Ej: Tienda Centro" />
+              <select value={draft.ubicacion} onChange={e => setDraft({ ...draft, ubicacion: e.target.value })} required>
+                <option value="">Selecciona ubicación</option>
+                {ubicacionesUnicas.map(u => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label>Precio</label>
