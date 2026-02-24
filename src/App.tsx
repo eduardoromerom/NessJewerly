@@ -65,7 +65,7 @@ export default function App() {
   const [q, setQ] = useState('')
   const [filtroUbicacion, setFiltroUbicacion] = useState<string>('')
   const [items, setItems] = useState<Producto[]>(seed)
-  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]) // Lista de ubicaciones
+  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([])
   const [draft, setDraft] = useState<Producto>({ id: '', sku: '', nombre: '', categoria: '', material: '', ubicacion: '', precio: 0, stock: 0 })
   const [mvDraft, setMvDraft] = useState<Movimiento>({
     id: '', productoId: '', tipo: 'entrada', cantidad: 1, fecha: serverTimestamp(), nota: ''
@@ -80,7 +80,7 @@ export default function App() {
     return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  // Cargar ubicaciones desde Firestore
+  // Cargar ubicaciones
   useEffect(() => {
     if (!user) return
 
@@ -98,9 +98,9 @@ export default function App() {
 
   const ubicacionesUnicas = useMemo(() => ubicaciones.map(u => u.nombre).sort(), [ubicaciones])
 
-  // Agregar nueva ubicación
+  // Agregar ubicación
   async function agregarUbicacion() {
-    const nombre = prompt("Escribe el nombre de la nueva ubicación (ej. Tienda Centro):")
+    const nombre = prompt("Escribe el nombre de la nueva ubicación:")
     if (!nombre || nombre.trim() === '') return
 
     const id = `ubi-${Date.now()}`
@@ -114,9 +114,8 @@ export default function App() {
 
   // Borrar ubicación
   async function borrarUbicacion(id: string, nombre: string) {
-    if (!confirm(`¿Borrar ubicación "${nombre}"?`)) return
+    if (!confirm(`¿Borrar "${nombre}"?`)) return
 
-    // Verificar si hay productos usando esta ubicación
     const productosEnUbicacion = items.some(p => p.ubicacion === nombre)
     if (productosEnUbicacion) {
       alert("No se puede borrar: hay productos en esta ubicación.")
@@ -196,10 +195,14 @@ export default function App() {
       return
     }
 
-    // Verificar SKU duplicado
     const skuExistente = items.some(p => p.sku.toLowerCase() === draft.sku.toLowerCase() && p.id !== draft.id)
     if (skuExistente) {
       alert("Este SKU ya existe. Usa uno diferente.")
+      return
+    }
+
+    if (!draft.ubicacion) {
+      alert("Selecciona una ubicación")
       return
     }
 
@@ -305,9 +308,13 @@ export default function App() {
     if (num > 1) {
       const indexUbicacion = num - 2;
       const ubicacionSeleccionada = ubicacionesUnicas[indexUbicacion];
+      if (!ubicacionSeleccionada) {
+        alert("Ubicación no encontrada.");
+        return;
+      }
       filteredItems = items.filter(item => item.ubicacion === ubicacionSeleccionada);
       sheetName = ubicacionSeleccionada;
-      nombreArchivo = `inventario_${ubicacionSeleccionada.replace(/ /g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      nombreArchivo = `inventario_${ubicacionSeleccionada.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
     }
 
     // Ordenar por categoría alfabética
@@ -330,10 +337,10 @@ export default function App() {
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, sheetName)
-    XLSX.writeFile(wb, nombreArchivo)
-    alert(`Reporte descargado como:\n${nombreArchivo}`)
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.writeFile(wb, nombreArchivo);
+    alert(`Reporte descargado como:\n${nombreArchivo}`);
   }
 
   if (loadingAuth) return <div style={{ padding: '100px', textAlign: 'center' }}>Cargando...</div>
@@ -396,6 +403,10 @@ export default function App() {
             margin: '0 auto',
             borderRadius: '12px',
             boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}
+          onError={(e) => {
+            e.currentTarget.src = 'https://via.placeholder.com/500x150/000/fff?text=Logo+Ness+Juweiler';
+            console.error("Error cargando logo local, usando placeholder");
           }}
         />
       </div>
@@ -608,6 +619,11 @@ export default function App() {
           <button className="tab" onClick={resetAll}>Borrar TODO (dev)</button>
           <hr />
           <h3>Ubicaciones</h3>
+          <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '15px', gap: '10px' }}>
+            <button className="tab" onClick={agregarUbicacion}>
+              Agregar Ubicación
+            </button>
+          </div>
           <table>
             <thead>
               <tr>
@@ -623,7 +639,7 @@ export default function App() {
                   </td>
                 </tr>
               ))}
-              {ubicaciones.length === 0 && <tr><td colSpan={2}>No hay ubicaciones.</td></tr>}
+              {ubicaciones.length === 0 && <tr><td colSpan={2}>No hay ubicaciones registradas.</td></tr>}
             </tbody>
           </table>
         </section>
