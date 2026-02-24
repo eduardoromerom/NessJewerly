@@ -9,8 +9,7 @@ import {
   deleteDoc,
   serverTimestamp,
   onSnapshot,
-  addDoc,
-  getDocs
+  addDoc
 } from 'firebase/firestore'
 import {
   createUserWithEmailAndPassword,
@@ -145,12 +144,10 @@ export default function App() {
       return
     }
 
-    // Verificar si el SKU ya existe (ignorando mayúsculas/minúsculas y si es edición del mismo producto)
-    const skuExistente = items.some(p => 
-      p.sku.toLowerCase() === draft.sku.toLowerCase() && p.id !== draft.id
-    )
+    // Verificar si SKU ya existe
+    const skuExistente = items.some(p => p.sku.toLowerCase() === draft.sku.toLowerCase() && p.id !== draft.id)
     if (skuExistente) {
-      alert("¡Este SKU ya está registrado! Usa uno diferente.")
+      alert("Este SKU ya existe. Usa uno diferente.")
       return
     }
 
@@ -169,7 +166,7 @@ export default function App() {
 
     try {
       await setDoc(doc(db, 'items', id), data, { merge: true })
-      alert("Producto guardado exitosamente")
+      alert("Producto guardado")
       resetDraft()
     } catch (err: any) {
       alert("Error al guardar: " + err.message)
@@ -177,7 +174,7 @@ export default function App() {
   }
 
   async function remove(id: string) {
-    if (!confirm('¿Eliminar producto?')) return
+    if (!confirm('¿Eliminar?')) return
     try {
       await deleteDoc(doc(db, 'items', id))
     } catch (err: any) {
